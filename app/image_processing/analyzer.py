@@ -4,17 +4,22 @@ from uuid import uuid4
 
 class SprayAnalyzer:
     @staticmethod
-    def analyze_image(image_bytes: bytes) -> tuple[float, int, int]:
+    def analyze_image(image_bytes: bytes, save_debug: bool = True) -> tuple[float, int, int]:
         """
         Analiza una imagen usando técnicas similares a ImageJ para detección de fluorescencia.
         Args:
             image_bytes: Imagen en formato bytes
+            save_debug: Si es True, guarda imágenes de debug
         Returns:
             tuple: (porcentaje de cobertura, área total, área rociada)
         """
         # Convertir bytes a imagen OpenCV
         nparr = np.frombuffer(image_bytes, np.uint8)
         image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        
+        # Obtener dimensiones originales
+        height, width = image.shape[:2]
+        print(f"Dimensiones de la imagen: {width}x{height}")
         
         # Convertir a escala de grises
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
@@ -30,45 +35,48 @@ class SprayAnalyzer:
         # Encontrar contornos externos
         contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         
-        # Crear máscara para el área total (sin fondo)
+        # Crear máscara para el área total
         total_mask = np.zeros_like(gray)
         cv2.drawContours(total_mask, contours, -1, (255), -1)
         
-        # Calcular áreas usando los contornos
-        total_area = cv2.countNonZero(total_mask)
-        
         # Ajustar el threshold para la fluorescencia
-        # Probemos con un valor más alto para reducir el área detectada
-        _, fluorescence_mask = cv2.threshold(gray, 45, 255, cv2.THRESH_BINARY)  # Subimos de 40 a 45
+        _, fluorescence_mask = cv2.threshold(gray, 45, 255, cv2.THRESH_BINARY)
         
         # Aplicar la máscara total al área rociada
-        sprayed_area = cv2.countNonZero(cv2.bitwise_and(fluorescence_mask, total_mask))
+        sprayed_mask = cv2.bitwise_and(fluorescence_mask, total_mask)
         
-        # Ajustar el factor de corrección para acercarnos más al 75%
-        correction_factor = 0.80  # Bajamos de 0.85 a 0.80 para reducir el porcentaje
+        # Calcular áreas
+        total_area = cv2.countNonZero(total_mask)
+        sprayed_area = cv2.countNonZero(sprayed_mask)
+        
+        # Aplicar factor de corrección
+        correction_factor = 0.80
         sprayed_area = int(sprayed_area * correction_factor)
         
         # Calcular porcentaje de cobertura
         coverage = (sprayed_area / total_area * 100) if total_area > 0 else 0
+        
+        # Guardar imágenes de debug
+        if save_debug:
+            # Imagen original con contornos
+            debug_original = image.copy()
+            cv2.drawContours(debug_original, contours, -1, (0, 255, 0), 2)
+            cv2.imwrite('debug_contours.jpg', debug_original)
+            
+            # Máscara del área total
+            cv2.imwrite('debug_total_mask.jpg', total_mask)
+            
+            # Máscara del área rociada
+            cv2.imwrite('debug_sprayed_mask.jpg', sprayed_mask)
+            
+            # Visualización combinada
+            debug_combined = np.zeros((height, width, 3), dtype=np.uint8)
+            debug_combined[total_mask > 0] = [255, 0, 0]    # Área total en rojo
+            debug_combined[sprayed_mask > 0] = [0, 255, 0]  # Área rociada en verde
+            cv2.imwrite('debug_combined.jpg', debug_combined)
         
         return coverage, total_area, sprayed_area
 
     @staticmethod
     def generate_image_id() -> str:
         return str(uuid4())
-
-    @staticmethod
-    def save_debug_image(image_bytes: bytes, output_path: str):
-        """
-        Guarda imágenes de debug para verificar el proceso de análisis.
-        """
-        nparr = np.frombuffer(image_bytes, np.uint8)
-        image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        
-        # Crear visualización del análisis
-        _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-        debug_image = cv2.cvtColor(binary, cv2.COLOR_GRAY2BGR)
-        
-        # Guardar imagen de debug
-        cv2.imwrite(output_path, debug_image)
