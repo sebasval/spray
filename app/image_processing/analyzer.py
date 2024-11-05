@@ -1,6 +1,8 @@
 import cv2
 import numpy as np
 from uuid import uuid4
+from typing import List
+from app.models.image import ImageAnalysisResponse
 
 class SprayAnalyzer:
     @staticmethod
@@ -80,3 +82,21 @@ class SprayAnalyzer:
     @staticmethod
     def generate_image_id() -> str:
         return str(uuid4())
+
+    @staticmethod
+    def calculate_batch_summary(analyses: List[ImageAnalysisResponse]) -> dict:
+        """
+        Calcula estadísticas para un lote de análisis
+        """
+        coverages = [analysis.coverage_percentage for analysis in analyses]
+        total_areas = [analysis.total_area for analysis in analyses]
+        sprayed_areas = [analysis.sprayed_area for analysis in analyses]
+        
+        return {
+            "total_images": len(analyses),
+            "average_coverage": round(sum(coverages) / len(coverages), 2) if coverages else 0,
+            "min_coverage": round(min(coverages), 2) if coverages else 0,
+            "max_coverage": round(max(coverages), 2) if coverages else 0,
+            "total_area_analyzed": sum(total_areas),
+            "total_area_sprayed": sum(sprayed_areas)
+        }

@@ -1,19 +1,18 @@
-from fastapi import FastAPI, UploadFile, HTTPException
+from fastapi import FastAPI, UploadFile, HTTPException, File
 from fastapi.middleware.cors import CORSMiddleware
+from typing import List
 import io
 
-# Importamos nuestras clases personalizadas
-from app.models.image import ImageAnalysisResponse
+from app.models.image import ImageAnalysisResponse, BatchAnalysisResponse
 from app.image_processing.analyzer import SprayAnalyzer
 
-# Configuración de la app
 app = FastAPI(
     title="Spray Analyzer API",
     description="API para análisis de cobertura de rociado en hojas",
     version="1.0.0"
 )
 
-# Configurar CORS (mantener el que ya teníamos)
+# Configurar CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -22,7 +21,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Mantenemos los endpoints existentes
 @app.get("/")
 async def read_root():
     return {"message": "Bienvenido a Spray Analyzer API"}
@@ -34,28 +32,64 @@ async def health_check():
         "version": "1.0.0"
     }
 
-# Nuevo endpoint para analizar imágenes
 @app.post("/analyze", response_model=ImageAnalysisResponse)
-async def analyze_image(file: UploadFile):
-    # Verificar que el archivo sea una imagen
+async def analyze_single_image(file: UploadFile):
     if not file.content_type.startswith('image/'):
         raise HTTPException(400, detail="El archivo debe ser una imagen")
     
     try:
-        # Leer el contenido de la imagen
         contents = await file.read()
-        
-        # Crear instancia del analizador y procesar la imagen
         analyzer = SprayAnalyzer()
         coverage, total_area, sprayed_area = analyzer.analyze_image(contents)
         
-        # Generar y retornar la respuesta
         return ImageAnalysisResponse(
             coverage_percentage=round(coverage, 2),
             total_area=total_area,
             sprayed_area=sprayed_area,
-            image_id=analyzer.generate_image_id()
+            image_id=analyzer.generate_image_id(),
+            file_name=file.filename
         )
-    
     except Exception as e:
         raise HTTPException(500, detail=str(e))
+
+@app.post("/analyze-batch", response_model=BatchAnalysisResponse)
+async def analyze_multiple_images(files: List[UploadFile] = File(...)):
+    if not files:
+        raise HTTPException(400, detail="No se proporcionaron archivos")
+    
+    analyses = []
+    errors = []
+    
+    for file in files:
+        if not file.content_type.startswith('image/'):
+            errors.append(f"{file.filename} no es una imagen válida")
+            continue
+        
+        try:
+            contents = await file.read()
+            analyzer = SprayAnalyzer()
+            coverage, total_area, sprayed_area = analyzer.analyze_image(contents)
+            
+            analysis = ImageAnalysisResponse(
+                coverage_percentage=round(coverage, 2),
+                total_area=total_area,
+                sprayed_area=sprayed_area,
+                image_id=analyzer.generate_image_id(),
+                file_name=file.filename
+            )
+            analyses.append(analysis)
+            
+        except Exception as e:
+            errors.append(f"Error procesando {file.filename}: {str(e)}")
+    
+    if not analyses:
+        raise HTTPException(400, detail="No se pudo procesar ninguna imagen")
+    
+    summary = SprayAnalyzer.calculate_batch_summary(analyses)
+    if errors:
+        summary["errors"] = errors
+    
+    return BatchAnalysisResponse(
+        analyses=analyses,
+        summary=summary
+    )
