@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Spray Analyzer</title>
+    <!-- Tailwind para estilos rápidos -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Chart.js para gráficas -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body class="p-8 bg-gray-100">
+    <div class="max-w-4xl mx-auto">
+        <!-- Sección de carga de imágenes -->
+        <div class="bg-white p-6 rounded-lg shadow-md mb-6">
+            <h2 class="text-2xl mb-4">Análisis de Imágenes</h2>
+            <input type="file" id="imageInput" multiple accept="image/*" class="mb-4">
+            <button onclick="analyzeImages()" class="bg-blue-500 text-white px-4 py-2 rounded">
+                Analizar Imágenes
+            </button>
+        </div>
+
+        <!-- Sección de resultados -->
+        <div class="bg-white p-6 rounded-lg shadow-md">
+            <h3 class="text-xl mb-4">Resultados</h3>
+            <!-- Gráfica de barras -->
+            <canvas id="resultsChart" class="mb-6"></canvas>
+            <!-- Tabla de resultados -->
+            <div id="resultsTable"></div>
+        </div>
+    </div>
+
+    <script>
+        let myChart = null;
+
+        async function analyzeImages() {
+            const input = document.getElementById('imageInput');
+            if (!input.files.length) {
+                alert('Por favor selecciona al menos una imagen');
+                return;
+            }
+
+            const formData = new FormData();
+            Array.from(input.files).forEach(file => {
+                formData.append('files', file);
+            });
+
+            try {
+                const response = await fetch('http://localhost:8000/analyze-batch', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const data = await response.json();
+                displayResults(data);
+            } catch (error) {
+                console.error('Error:', error);
+                alert('Error al analizar las imágenes');
+            }
+        }
+
+        function displayResults(data) {
+            // Destruir gráfica anterior si existe
+            if (myChart) {
+                myChart.destroy();
+            }
+
+            // Preparar datos para la gráfica
+            const labels = data.analyses.map(a => a.file_name);
+            const coverages = data.analyses.map(a => a.coverage_percentage);
+
+            // Crear nueva gráfica
+            const ctx = document.getElementById('resultsChart').getContext('2d');
+            myChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: '% de Cobertura',
+                        data: coverages,
+                        backgroundColor: 'rgba(54, 162, 235, 0.5)',
+                        borderColor: 'rgba(54, 162, 235, 1)',
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            max: 100
+                        }
+                    }
+                }
+            });
+
+            // Mostrar tabla de resultados
+            const tableHtml = `
+                <table class="w-full text-left">
+                    <thead>
+                        <tr>
+                            <th class="p-2">Archivo</th>
+                            <th class="p-2">Cobertura (%)</th>
+                            <th class="p-2">Área Total</th>
+                            <th class="p-2">Área Rociada</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${data.analyses.map(analysis => `
+                            <tr>
+                                <td class="p-2">${analysis.file_name}</td>
+                                <td class="p-2">${analysis.coverage_percentage.toFixed(2)}%</td>
+                                <td class="p-2">${analysis.total_area}</td>
+                                <td class="p-2">${analysis.sprayed_area}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+                <div class="mt-4">
+                    <h4 class="font-bold">Resumen:</h4>
+                    <p>Promedio de cobertura: ${data.summary.average_coverage}%</p>
+                    <p>Cobertura mínima: ${data.summary.min_coverage}%</p>
+                    <p>Cobertura máxima: ${data.summary.max_coverage}%</p>
+                </div>
+            `;
+            
+            document.getElementById('resultsTable').innerHTML = tableHtml;
+        }
+    </script>
+</body>
+</html>
