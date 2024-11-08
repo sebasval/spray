@@ -1,29 +1,30 @@
 <!DOCTYPE html>
 <html>
 <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Spray Analyzer</title>
-    <!-- Tailwind para estilos rápidos -->
+    <!-- Tailwind and Chart.js -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Chart.js para gráficas -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body class="p-8 bg-gray-100">
     <div class="max-w-4xl mx-auto">
-        <!-- Sección de carga de imágenes -->
+        <!-- Image upload section -->
         <div class="bg-white p-6 rounded-lg shadow-md mb-6">
-            <h2 class="text-2xl mb-4">Análisis de Imágenes</h2>
+            <h2 class="text-2xl mb-4">Choose Images</h2>
             <input type="file" id="imageInput" multiple accept="image/*" class="mb-4">
             <button onclick="analyzeImages()" class="bg-blue-500 text-white px-4 py-2 rounded">
-                Analizar Imágenes
+                Analyze Images
             </button>
         </div>
 
-        <!-- Sección de resultados -->
+        <!-- Results section -->
         <div class="bg-white p-6 rounded-lg shadow-md">
-            <h3 class="text-xl mb-4">Resultados</h3>
-            <!-- Gráfica de barras -->
+            <h3 class="text-xl mb-4">Results</h3>
+            <!-- Bar chart -->
             <canvas id="resultsChart" class="mb-6"></canvas>
-            <!-- Tabla de resultados -->
+            <!-- Results table -->
             <div id="resultsTable"></div>
         </div>
     </div>
@@ -34,7 +35,7 @@
         async function analyzeImages() {
             const input = document.getElementById('imageInput');
             if (!input.files.length) {
-                alert('Por favor selecciona al menos una imagen');
+                alert('Please select at least one image');
                 return;
             }
 
@@ -53,28 +54,28 @@
                 displayResults(data);
             } catch (error) {
                 console.error('Error:', error);
-                alert('Error al analizar las imágenes');
+                alert('Error analyzing images');
             }
         }
 
         function displayResults(data) {
-            // Destruir gráfica anterior si existe
+            // Destroy previous chart if exists
             if (myChart) {
                 myChart.destroy();
             }
 
-            // Preparar datos para la gráfica
+            // Prepare data for chart
             const labels = data.analyses.map(a => a.file_name);
             const coverages = data.analyses.map(a => a.coverage_percentage);
 
-            // Crear nueva gráfica
+            // Create new chart
             const ctx = document.getElementById('resultsChart').getContext('2d');
             myChart = new Chart(ctx, {
                 type: 'bar',
                 data: {
                     labels: labels,
                     datasets: [{
-                        label: '% de Cobertura',
+                        label: 'Coverage %',
                         data: coverages,
                         backgroundColor: 'rgba(54, 162, 235, 0.5)',
                         borderColor: 'rgba(54, 162, 235, 1)',
@@ -91,15 +92,15 @@
                 }
             });
 
-            // Mostrar tabla de resultados
+            // Show results table
             const tableHtml = `
                 <table class="w-full text-left">
                     <thead>
                         <tr>
-                            <th class="p-2">Archivo</th>
-                            <th class="p-2">Cobertura (%)</th>
-                            <th class="p-2">Área Total</th>
-                            <th class="p-2">Área Rociada</th>
+                            <th class="p-2">File</th>
+                            <th class="p-2">Coverage (%)</th>
+                            <th class="p-2">Total Area</th>
+                            <th class="p-2">Sprayed Area</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -114,10 +115,10 @@
                     </tbody>
                 </table>
                 <div class="mt-4">
-                    <h4 class="font-bold">Resumen:</h4>
-                    <p>Promedio de cobertura: ${data.summary.average_coverage}%</p>
-                    <p>Cobertura mínima: ${data.summary.min_coverage}%</p>
-                    <p>Cobertura máxima: ${data.summary.max_coverage}%</p>
+                    <h4 class="font-bold">Summary:</h4>
+                    <p>Average coverage: ${data.summary.average_coverage}%</p>
+                    <p>Minimum coverage: ${data.summary.min_coverage}%</p>
+                    <p>Maximum coverage: ${data.summary.max_coverage}%</p>
                 </div>
             `;
             
