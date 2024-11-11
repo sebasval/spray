@@ -22,6 +22,12 @@
         <!-- Results section -->
         <div class="bg-white p-6 rounded-lg shadow-md">
             <h3 class="text-xl mb-4">Results</h3>
+            <!-- Download Excel button (initially hidden) -->
+            <button id="downloadExcel" 
+                    onclick="downloadExcel()" 
+                    class="bg-green-500 text-white px-4 py-2 rounded mb-4 hidden">
+                Download Excel Report
+            </button>
             <!-- Bar chart -->
             <canvas id="resultsChart" class="mb-6"></canvas>
             <!-- Results table -->
@@ -31,6 +37,7 @@
 
     <script>
         let myChart = null;
+        let currentAnalysisId = null;
 
         async function analyzeImages() {
             const input = document.getElementById('imageInput');
@@ -51,10 +58,39 @@
                 });
                 
                 const data = await response.json();
+                currentAnalysisId = data.analysis_id;
                 displayResults(data);
+                
+                // Show download button
+                document.getElementById('downloadExcel').classList.remove('hidden');
             } catch (error) {
                 console.error('Error:', error);
                 alert('Error analyzing images');
+            }
+        }
+
+        async function downloadExcel() {
+            if (!currentAnalysisId) {
+                alert('No analysis results available');
+                return;
+            }
+
+            try {
+                const response = await fetch(`http://localhost:8000/download-excel/${currentAnalysisId}`);
+                if (!response.ok) throw new Error('Network response was not ok');
+
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `analisis_rociado_${new Date().toISOString().slice(0,19).replace(/[-:]/g, '')}.xlsx`;
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                a.remove();
+            } catch (error) {
+                console.error('Error downloading Excel:', error);
+                alert('Error downloading Excel file');
             }
         }
 

@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import List, Optional
 
 class ImageAnalysisResponse(BaseModel):
     coverage_percentage: float
@@ -7,9 +7,8 @@ class ImageAnalysisResponse(BaseModel):
     sprayed_area: int
     image_id: str
     file_name: str
-    status: str = "success"
-    message: Optional[str] = None
 
 class BatchAnalysisResponse(BaseModel):
     analyses: List[ImageAnalysisResponse]
     summary: dict
+    analysis_id: str  # Nuevo campo para identificar el análisis para la descarga del Excel
