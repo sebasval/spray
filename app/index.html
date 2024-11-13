@@ -10,34 +10,91 @@
 </head>
 <body class="p-8 bg-gray-100">
     <div class="max-w-4xl mx-auto">
+        <!-- Config section with API status -->
+        <div class="bg-white p-6 rounded-lg shadow-md mb-6">
+            <h2 class="text-2xl font-bold mb-4">Spray Analyzer</h2>
+            <div id="apiStatus" class="text-sm mb-4 flex items-center">
+                <span class="mr-2">API Status:</span>
+                <span id="statusIndicator" class="flex items-center">
+                    Checking connection...
+                </span>
+            </div>
+            <div id="apiUrl" class="text-sm text-gray-600"></div>
+        </div>
+
         <!-- Image upload section -->
         <div class="bg-white p-6 rounded-lg shadow-md mb-6">
             <h2 class="text-2xl mb-4">Choose Images</h2>
-            <input type="file" id="imageInput" multiple accept="image/*" class="mb-4">
-            <button onclick="analyzeImages()" class="bg-blue-500 text-white px-4 py-2 rounded">
+            <input type="file" id="imageInput" multiple accept="image/*" class="mb-4 p-2 w-full border rounded">
+            <button onclick="analyzeImages()" id="analyzeButton" 
+                    class="bg-blue-500 text-white px-6 py-2 rounded hover:bg-blue-600 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed">
                 Analyze Images
             </button>
         </div>
 
+        <!-- Loading indicator -->
+        <div id="loadingIndicator" class="hidden">
+            <div class="flex justify-center items-center mb-6">
+                <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+                <span class="ml-2">Processing images...</span>
+            </div>
+        </div>
+
         <!-- Results section -->
-        <div class="bg-white p-6 rounded-lg shadow-md">
+        <div id="resultsSection" class="bg-white p-6 rounded-lg shadow-md hidden">
             <h3 class="text-xl mb-4">Results</h3>
-            <!-- Download Excel button (initially hidden) -->
             <button id="downloadExcel" 
                     onclick="downloadExcel()" 
-                    class="bg-green-500 text-white px-4 py-2 rounded mb-4 hidden">
+                    class="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 transition-colors mb-4">
                 Download Excel Report
             </button>
-            <!-- Bar chart -->
             <canvas id="resultsChart" class="mb-6"></canvas>
-            <!-- Results table -->
             <div id="resultsTable"></div>
         </div>
     </div>
 
     <script>
+        // API Configuration
+        const API_URL = window.location.hostname === 'localhost' 
+            ? 'http://localhost:8000'
+            : 'https://spray-production.up.railway.app';
+
         let myChart = null;
         let currentAnalysisId = null;
+
+        // Check API status on load
+        async function checkApiStatus() {
+            const statusIndicator = document.getElementById('statusIndicator');
+            const analyzeButton = document.getElementById('analyzeButton');
+            const apiUrlDiv = document.getElementById('apiUrl');
+
+            try {
+                const response = await fetch(`${API_URL}/health`);
+                const data = await response.json();
+                
+                if (data.status === 'healthy') {
+                    statusIndicator.innerHTML = `
+                        <span class="text-green-500 flex items-center">
+                            <svg class="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+                            </svg>
+                            Connected
+                        </span>`;
+                    analyzeButton.disabled = false;
+                }
+                apiUrlDiv.textContent = `Using API at: ${API_URL}`;
+            } catch (error) {
+                statusIndicator.innerHTML = `
+                    <span class="text-red-500 flex items-center">
+                        <svg class="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"/>
+                        </svg>
+                        Disconnected
+                    </span>`;
+                analyzeButton.disabled = true;
+                console.error('API Connection Error:', error);
+            }
+        }
 
         async function analyzeImages() {
             const input = document.getElementById('imageInput');
@@ -46,26 +103,37 @@
                 return;
             }
 
+            // Show loading indicator
+            document.getElementById('loadingIndicator').classList.remove('hidden');
+            document.getElementById('analyzeButton').disabled = true;
+            document.getElementById('resultsSection').classList.add('hidden');
+
             const formData = new FormData();
             Array.from(input.files).forEach(file => {
                 formData.append('files', file);
             });
 
             try {
-                const response = await fetch('http://localhost:8000/analyze-batch', {
+                const response = await fetch(`${API_URL}/analyze-batch`, {
                     method: 'POST',
                     body: formData
                 });
                 
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.detail || 'Error analyzing images');
+                }
+                
                 const data = await response.json();
                 currentAnalysisId = data.analysis_id;
                 displayResults(data);
-                
-                // Show download button
-                document.getElementById('downloadExcel').classList.remove('hidden');
+                document.getElementById('resultsSection').classList.remove('hidden');
             } catch (error) {
                 console.error('Error:', error);
-                alert('Error analyzing images');
+                alert(error.message || 'Error analyzing images');
+            } finally {
+                document.getElementById('loadingIndicator').classList.add('hidden');
+                document.getElementById('analyzeButton').disabled = false;
             }
         }
 
@@ -76,8 +144,8 @@
             }
 
             try {
-                const response = await fetch(`http://localhost:8000/download-excel/${currentAnalysisId}`);
-                if (!response.ok) throw new Error('Network response was not ok');
+                const response = await fetch(`${API_URL}/download-excel/${currentAnalysisId}`);
+                if (!response.ok) throw new Error('Error downloading file');
 
                 const blob = await response.blob();
                 const url = window.URL.createObjectURL(blob);
@@ -95,16 +163,13 @@
         }
 
         function displayResults(data) {
-            // Destroy previous chart if exists
             if (myChart) {
                 myChart.destroy();
             }
 
-            // Prepare data for chart
             const labels = data.analyses.map(a => a.file_name);
             const coverages = data.analyses.map(a => a.coverage_percentage);
 
-            // Create new chart
             const ctx = document.getElementById('resultsChart').getContext('2d');
             myChart = new Chart(ctx, {
                 type: 'bar',
@@ -113,53 +178,80 @@
                     datasets: [{
                         label: 'Coverage %',
                         data: coverages,
-                        backgroundColor: 'rgba(54, 162, 235, 0.5)',
-                        borderColor: 'rgba(54, 162, 235, 1)',
+                        backgroundColor: 'rgba(59, 130, 246, 0.5)',
+                        borderColor: 'rgba(59, 130, 246, 1)',
                         borderWidth: 1
                     }]
                 },
                 options: {
+                    responsive: true,
                     scales: {
                         y: {
                             beginAtZero: true,
-                            max: 100
+                            max: 100,
+                            title: {
+                                display: true,
+                                text: 'Coverage Percentage'
+                            }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            position: 'top',
+                        },
+                        title: {
+                            display: true,
+                            text: 'Spray Coverage Analysis Results'
                         }
                     }
                 }
             });
 
-            // Show results table
             const tableHtml = `
-                <table class="w-full text-left">
-                    <thead>
-                        <tr>
-                            <th class="p-2">File</th>
-                            <th class="p-2">Coverage (%)</th>
-                            <th class="p-2">Total Area</th>
-                            <th class="p-2">Sprayed Area</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${data.analyses.map(analysis => `
-                            <tr>
-                                <td class="p-2">${analysis.file_name}</td>
-                                <td class="p-2">${analysis.coverage_percentage.toFixed(2)}%</td>
-                                <td class="p-2">${analysis.total_area}</td>
-                                <td class="p-2">${analysis.sprayed_area}</td>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left border-collapse">
+                        <thead>
+                            <tr class="bg-gray-100">
+                                <th class="p-2 border">File</th>
+                                <th class="p-2 border">Coverage (%)</th>
+                                <th class="p-2 border">Total Area</th>
+                                <th class="p-2 border">Sprayed Area</th>
                             </tr>
-                        `).join('')}
-                    </tbody>
-                </table>
-                <div class="mt-4">
-                    <h4 class="font-bold">Summary:</h4>
-                    <p>Average coverage: ${data.summary.average_coverage}%</p>
-                    <p>Minimum coverage: ${data.summary.min_coverage}%</p>
-                    <p>Maximum coverage: ${data.summary.max_coverage}%</p>
+                        </thead>
+                        <tbody>
+                            ${data.analyses.map(analysis => `
+                                <tr class="hover:bg-gray-50">
+                                    <td class="p-2 border">${analysis.file_name}</td>
+                                    <td class="p-2 border">${analysis.coverage_percentage.toFixed(2)}%</td>
+                                    <td class="p-2 border">${analysis.total_area.toLocaleString()}</td>
+                                    <td class="p-2 border">${analysis.sprayed_area.toLocaleString()}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+                <div class="mt-6 p-4 bg-gray-50 rounded-lg">
+                    <h4 class="font-bold mb-2">Analysis Summary</h4>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <p class="mb-1">Average Coverage: <span class="font-semibold">${data.summary.average_coverage.toFixed(2)}%</span></p>
+                            <p class="mb-1">Minimum Coverage: <span class="font-semibold">${data.summary.min_coverage.toFixed(2)}%</span></p>
+                            <p class="mb-1">Maximum Coverage: <span class="font-semibold">${data.summary.max_coverage.toFixed(2)}%</span></p>
+                        </div>
+                        <div>
+                            <p class="mb-1">Total Images: <span class="font-semibold">${data.summary.total_images}</span></p>
+                            <p class="mb-1">Total Area Analyzed: <span class="font-semibold">${data.summary.total_area_analyzed.toLocaleString()}</span></p>
+                            <p class="mb-1">Total Area Sprayed: <span class="font-semibold">${data.summary.total_area_sprayed.toLocaleString()}</span></p>
+                        </div>
+                    </div>
                 </div>
             `;
             
             document.getElementById('resultsTable').innerHTML = tableHtml;
         }
+
+        // Check API status when page loads
+        checkApiStatus();
     </script>
 </body>
 </html>
