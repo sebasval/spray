@@ -57,19 +57,37 @@ async def analyze_single_image(file: UploadFile):
 
 @app.post("/analyze-batch", response_model=BatchAnalysisResponse)
 async def analyze_multiple_images(files: List[UploadFile] = File(...)):
+    # Validar número máximo de archivos
+    MAX_FILES = 100
+    MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB por archivo
+    
     if not files:
         raise HTTPException(400, detail="No se proporcionaron archivos")
+    
+    if len(files) > MAX_FILES:
+        raise HTTPException(
+            400, 
+            detail=f"Se excedió el límite de archivos. Máximo permitido: {MAX_FILES}"
+        )
     
     analyses = []
     errors = []
     
     for file in files:
+        # Validar tipo de archivo
         if not file.content_type.startswith('image/'):
             errors.append(f"{file.filename} no es una imagen válida")
             continue
-            
+        
+        # Validar tamaño del archivo
         try:
             contents = await file.read()
+            if len(contents) > MAX_FILE_SIZE:
+                errors.append(
+                    f"{file.filename} excede el tamaño máximo permitido de {MAX_FILE_SIZE/1024/1024}MB"
+                )
+                continue
+                
             analyzer = SprayAnalyzer()
             coverage, total_area, sprayed_area = analyzer.analyze_image(contents)
             analysis = ImageAnalysisResponse(
@@ -90,10 +108,8 @@ async def analyze_multiple_images(files: List[UploadFile] = File(...)):
     if errors:
         summary["errors"] = errors
 
-    # Generar ID único para este análisis
     analysis_id = SprayAnalyzer.generate_image_id()
     
-    # Guardar resultados en memoria
     analysis_results[analysis_id] = {
         "analyses": [analysis.dict() for analysis in analyses],
         "summary": summary,
