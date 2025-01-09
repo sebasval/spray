@@ -15,6 +15,8 @@ from app.image_processing.analyzer import SprayAnalyzer
 from app.auth.security import verify_token, create_access_token
 from app.auth.models import Token, UserCreate, User
 from app.auth.database import DatabaseManager
+# En la sección de importaciones de autenticación, añade/verifica:
+from app.auth.security import verify_token, create_access_token, verify_password  # Añadimos verify_password
 
 # Almacenamiento temporal de resultados (en producción usar Redis o similar)
 analysis_results: Dict[str, dict] = {}
@@ -40,6 +42,13 @@ app.add_middleware(
 async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends()):
     user = DatabaseManager.get_user(form_data.username)
     if not user:
+        raise HTTPException(
+            status_code=401,
+            detail="Email o contraseña incorrectos"
+        )
+    
+    # Verificar la contraseña
+    if not verify_password(form_data.password, user.hashed_password):
         raise HTTPException(
             status_code=401,
             detail="Email o contraseña incorrectos"
