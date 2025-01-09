@@ -1,12 +1,20 @@
-from fastapi import FastAPI, UploadFile, HTTPException, File
+from fastapi import FastAPI, UploadFile, HTTPException, File, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from fastapi.security import OAuth2PasswordRequestForm
 from typing import List, Dict
 import io
 from openpyxl import Workbook
 from datetime import datetime
+
+# Importaciones existentes
 from app.models.image import ImageAnalysisResponse, BatchAnalysisResponse
 from app.image_processing.analyzer import SprayAnalyzer
+
+# Nuevas importaciones para autenticación
+from app.auth.security import verify_token, create_access_token
+from app.auth.models import Token, UserCreate, User
+from app.auth.database import DatabaseManager
 
 # Almacenamiento temporal de resultados (en producción usar Redis o similar)
 analysis_results: Dict[str, dict] = {}
@@ -26,6 +34,61 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Rutas de autenticación
+@app.post("/token", response_model=Token)
+async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends()):
+    user = DatabaseManager.get_user(form_data.username)
+    if not user:
+        raise HTTPException(
+            status_code=401,
+            detail="Email o contraseña incorrectos"
+        )
+    
+    # Actualizar último login
+    DatabaseManager.update_last_login(user.email)
+    
+    access_token = create_access_token(
+        data={"sub": user.email}
+    )
+    return Token(access_token=access_token)
+
+@app.post("/users", response_model=User)
+async def create_user(
+    user: UserCreate,
+    current_user: str = Depends(verify_token) if DatabaseManager.count_users() > 0 else None
+):
+    """
+    Crear un nuevo usuario.
+    El primer usuario se puede crear sin autenticación.
+    Los siguientes usuarios requieren autenticación del administrador.
+    """
+    # Verificar si ya hay 7 usuarios (o el límite configurado)
+    if DatabaseManager.count_users() >= 7:  # Puedes ajustar este número según necesites
+        raise HTTPException(
+            status_code=400,
+            detail="Se ha alcanzado el límite máximo de usuarios permitidos"
+        )
+    
+    # Si no es el primer usuario, verificar que quien lo crea esté autenticado
+    if DatabaseManager.count_users() > 0 and not current_user:
+        raise HTTPException(
+            status_code=401,
+            detail="Se requiere autenticación para crear usuarios adicionales"
+        )
+        
+    return DatabaseManager.create_user(user)
+
+@app.get("/users/me", response_model=User)
+async def read_users_me(current_user: str = Depends(verify_token)):
+    """
+    Obtener información del usuario actual
+    """
+    user = DatabaseManager.get_user(current_user)
+    if user is None:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    return user
+
+# Rutas existentes modificadas para requerir autenticación
 @app.get("/")
 async def read_root():
     return {"message": "Bienvenido a Spray Analyzer API"}
@@ -38,7 +101,10 @@ async def health_check():
     }
 
 @app.post("/analyze", response_model=ImageAnalysisResponse)
-async def analyze_single_image(file: UploadFile):
+async def analyze_single_image(
+    file: UploadFile,
+    current_user: str = Depends(verify_token)  # Añadido requerimiento de autenticación
+):
     if not file.content_type.startswith('image/'):
         raise HTTPException(400, detail="El archivo debe ser una imagen")
     try:
@@ -56,7 +122,10 @@ async def analyze_single_image(file: UploadFile):
         raise HTTPException(500, detail=str(e))
 
 @app.post("/analyze-batch", response_model=BatchAnalysisResponse)
-async def analyze_multiple_images(files: List[UploadFile] = File(...)):
+async def analyze_multiple_images(
+    files: List[UploadFile] = File(...),
+    current_user: str = Depends(verify_token)  # Añadido requerimiento de autenticación
+):
     # Validar número máximo de archivos
     MAX_FILES = 100
     MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB por archivo
@@ -123,7 +192,10 @@ async def analyze_multiple_images(files: List[UploadFile] = File(...)):
     )
 
 @app.get("/download-excel/{analysis_id}")
-async def download_excel(analysis_id: str):
+async def download_excel(
+    analysis_id: str,
+    current_user: str = Depends(verify_token)
+):
     # Verificar si existe el análisis
     if analysis_id not in analysis_results:
         raise HTTPException(404, detail="Análisis no encontrado")
