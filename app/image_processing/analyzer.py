@@ -2,101 +2,130 @@ import cv2
 import numpy as np
 from uuid import uuid4
 from typing import List
+import matplotlib.pyplot as plt
 from app.models.image import ImageAnalysisResponse
 
 class SprayAnalyzer:
+    # Parámetros ajustados para mejor detección de fluorescencia
+    LOWER_THRESHOLD = 180  # Umbral para detectar áreas brillantes
+    UPPER_THRESHOLD = 255  # Máximo valor de brillo
+    MIN_SPRAY_AREA = 5     # Área mínima para considerar una gota
+    MORPH_KERNEL_SIZE = 2  # Tamaño del kernel para operaciones morfológicas
+
     @staticmethod
-    def analyze_image(image_bytes: bytes, save_debug: bool = True) -> tuple[float, int, int]:
+    def analyze_image(
+        image_bytes: bytes, save_debug: bool = True
+    ) -> tuple[float, int, int]:
         """
-        Analiza una imagen usando técnicas similares a ImageJ para detección de fluorescencia.
-        Args:
-            image_bytes: Imagen en formato bytes
-            save_debug: Si es True, guarda imágenes de debug
-        Returns:
-            tuple: (porcentaje de cobertura, área total, área rociada)
+        Analiza una imagen para detectar cobertura de spray usando fluorescencia UV
         """
         # Convertir bytes a imagen OpenCV
         nparr = np.frombuffer(image_bytes, np.uint8)
         image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-        
-        # Obtener dimensiones originales
         height, width = image.shape[:2]
-        print(f"Dimensiones de la imagen: {width}x{height}")
+
+        # Convertir a HSV para mejor detección de fluorescencia
+        hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
         
-        # Convertir a escala de grises
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        # Extraer canal V (brillo) para detectar fluorescencia
+        v_channel = hsv[:,:,2]
         
-        # Aplicar threshold automático
-        _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        # Aplicar desenfoque Gaussiano para reducir ruido
+        blurred = cv2.GaussianBlur(v_channel, (3,3), 0)
         
-        # Eliminar ruido y mejorar la segmentación
-        kernel = np.ones((3,3), np.uint8)
-        binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel)
-        binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
+        # Crear máscara para fluorescencia
+        fluorescence_mask = cv2.inRange(
+            blurred, SprayAnalyzer.LOWER_THRESHOLD, SprayAnalyzer.UPPER_THRESHOLD
+        )
+
+        # Operaciones morfológicas para limpiar la máscara
+        kernel = np.ones(
+            (SprayAnalyzer.MORPH_KERNEL_SIZE, SprayAnalyzer.MORPH_KERNEL_SIZE), 
+            np.uint8
+        )
+        cleaned_mask = cv2.morphologyEx(fluorescence_mask, cv2.MORPH_OPEN, kernel)
         
-        # Encontrar contornos externos
-        contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        
-        # Crear máscara para el área total
-        total_mask = np.zeros_like(gray)
-        cv2.drawContours(total_mask, contours, -1, (255), -1)
-        
-        # Ajustar el threshold para la fluorescencia
-        _, fluorescence_mask = cv2.threshold(gray, 45, 255, cv2.THRESH_BINARY)
-        
-        # Aplicar la máscara total al área rociada
-        sprayed_mask = cv2.bitwise_and(fluorescence_mask, total_mask)
-        
-        # Calcular áreas
-        total_area = cv2.countNonZero(total_mask)
-        sprayed_area = cv2.countNonZero(sprayed_mask)
-        
-        # Aplicar factor de corrección
-        correction_factor = 0.80
-        sprayed_area = int(sprayed_area * correction_factor)
-        
+        # Encontrar y filtrar contornos
+        contours, _ = cv2.findContours(
+            cleaned_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+        )
+        valid_contours = [
+            cnt
+            for cnt in contours
+            if cv2.contourArea(cnt) > SprayAnalyzer.MIN_SPRAY_AREA
+        ]
+
+        # Crear máscara final con contornos válidos
+        final_mask = np.zeros_like(cleaned_mask)
+        cv2.drawContours(final_mask, valid_contours, -1, 255, -1)
+
+        # Detectar área de la hoja (usando umbral bajo en canal V)
+        leaf_mask = cv2.threshold(v_channel, 30, 255, cv2.THRESH_BINARY)[1]
+        leaf_area = cv2.countNonZero(leaf_mask)
+        sprayed_area = cv2.countNonZero(final_mask)
+
         # Calcular porcentaje de cobertura
-        coverage = (sprayed_area / total_area * 100) if total_area > 0 else 0
-        
-        # Guardar imágenes de debug
+        coverage = (sprayed_area / leaf_area * 100) if leaf_area > 0 else 0
+
+        # Guardar imágenes de debug si está habilitado
         if save_debug:
-            # Imagen original con contornos
-            debug_original = image.copy()
-            cv2.drawContours(debug_original, contours, -1, (0, 255, 0), 2)
-            cv2.imwrite('debug_contours.jpg', debug_original)
+            # Histograma de luminosidad
+            plt.figure(figsize=(10, 6))
+            plt.hist(v_channel.ravel(), 256, [0, 256])
+            plt.title("Distribución de Luminosidad")
+            plt.axvline(x=SprayAnalyzer.LOWER_THRESHOLD, color="r", linestyle="--")
+            plt.savefig("debug_histogram.jpg")
+            plt.close()
+
+            # Máscaras intermedias
+            cv2.imwrite("debug_v_channel.jpg", v_channel)
+            cv2.imwrite("debug_leaf_mask.jpg", leaf_mask)
+            cv2.imwrite("debug_fluorescence_mask.jpg", fluorescence_mask)
+            cv2.imwrite("debug_cleaned_mask.jpg", cleaned_mask)
+            cv2.imwrite("debug_final_mask.jpg", final_mask)
             
-            # Máscara del área total
-            cv2.imwrite('debug_total_mask.jpg', total_mask)
-            
-            # Máscara del área rociada
-            cv2.imwrite('debug_sprayed_mask.jpg', sprayed_mask)
-            
-            # Visualización combinada
-            debug_combined = np.zeros((height, width, 3), dtype=np.uint8)
-            debug_combined[total_mask > 0] = [255, 0, 0]    # Área total en rojo
-            debug_combined[sprayed_mask > 0] = [0, 255, 0]  # Área rociada en verde
-            cv2.imwrite('debug_combined.jpg', debug_combined)
-        
-        return coverage, total_area, sprayed_area
+            # Visualización de resultados
+            overlay = image.copy()
+            overlay[final_mask > 0] = [0, 255, 0]  # Áreas de spray en verde
+            cv2.imwrite("debug_overlay.jpg", overlay)
+
+        return round(coverage, 2), leaf_area, sprayed_area
 
     @staticmethod
     def generate_image_id() -> str:
+        """
+        Genera un ID único para cada imagen
+        """
         return str(uuid4())
 
     @staticmethod
     def calculate_batch_summary(analyses: List[ImageAnalysisResponse]) -> dict:
         """
-        Calcula estadísticas para un lote de análisis
+        Calcula estadísticas resumen para un lote de imágenes analizadas
         """
+        if not analyses:
+            return {
+                "total_images": 0,
+                "average_coverage": 0,
+                "min_coverage": 0,
+                "max_coverage": 0,
+                "total_area_analyzed": 0,
+                "total_area_sprayed": 0,
+                "global_coverage": 0,
+            }
+
         coverages = [analysis.coverage_percentage for analysis in analyses]
         total_areas = [analysis.total_area for analysis in analyses]
         sprayed_areas = [analysis.sprayed_area for analysis in analyses]
-        
+
         return {
             "total_images": len(analyses),
-            "average_coverage": round(sum(coverages) / len(coverages), 2) if coverages else 0,
-            "min_coverage": round(min(coverages), 2) if coverages else 0,
-            "max_coverage": round(max(coverages), 2) if coverages else 0,
+            "average_coverage": round(sum(coverages) / len(coverages), 2),
+            "min_coverage": round(min(coverages), 2),
+            "max_coverage": round(max(coverages), 2),
             "total_area_analyzed": sum(total_areas),
-            "total_area_sprayed": sum(sprayed_areas)
+            "total_area_sprayed": sum(sprayed_areas),
+            "global_coverage": round(
+                sum(sprayed_areas) / sum(total_areas) * 100, 2
+            ) if sum(total_areas) > 0 else 0,
         }
