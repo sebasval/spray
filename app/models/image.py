@@ -7,6 +7,7 @@ class ImageAnalysisResponse(BaseModel):
     sprayed_area: int
     image_id: str
     file_name: str
+    processed_image: Optional[str] = None  # Base64 de la imagen procesada
 
 class BatchAnalysisResponse(BaseModel):
     analyses: List[ImageAnalysisResponse]

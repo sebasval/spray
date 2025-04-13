@@ -120,13 +120,14 @@ async def analyze_single_image(
     try:
         contents = await file.read()
         analyzer = SprayAnalyzer()
-        coverage, total_area, sprayed_area = analyzer.analyze_image(contents)
+        coverage, total_area, sprayed_area, processed_image = analyzer.analyze_image(contents)
         return ImageAnalysisResponse(
             coverage_percentage=round(coverage, 2),
             total_area=total_area,
             sprayed_area=sprayed_area,
             image_id=analyzer.generate_image_id(),
-            file_name=file.filename
+            file_name=file.filename,
+            processed_image=processed_image
         )
     except Exception as e:
         raise HTTPException(500, detail=str(e))
@@ -168,13 +169,14 @@ async def analyze_multiple_images(
                 continue
                 
             analyzer = SprayAnalyzer()
-            coverage, total_area, sprayed_area = analyzer.analyze_image(contents)
+            coverage, total_area, sprayed_area, processed_image = analyzer.analyze_image(contents)
             analysis = ImageAnalysisResponse(
                 coverage_percentage=round(coverage, 2),
                 total_area=total_area,
                 sprayed_area=sprayed_area,
                 image_id=analyzer.generate_image_id(),
-                file_name=file.filename
+                file_name=file.filename,
+                processed_image=processed_image
             )
             analyses.append(analysis)
         except Exception as e:

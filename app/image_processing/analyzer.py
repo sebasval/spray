@@ -1,8 +1,9 @@
 import cv2
 import numpy as np
 from uuid import uuid4
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 import matplotlib.pyplot as plt
+import base64
 from app.models.image import ImageAnalysisResponse
 
 class SprayAnalyzer:
@@ -67,9 +68,12 @@ class SprayAnalyzer:
         return fluorescence_mask, mean_intensity
 
     @staticmethod
-    def analyze_image(image_bytes: bytes, save_debug: bool = True) -> tuple[float, int, int]:
+    def analyze_image(image_bytes: bytes, save_debug: bool = True) -> tuple[float, int, int, Optional[str]]:
         """
         Analiza una imagen para detectar cobertura de spray usando fluorescencia UV
+        
+        Returns:
+            tuple: (coverage_percentage, leaf_area, sprayed_area, processed_image_base64)
         """
         # Convertir bytes a imagen
         nparr = np.frombuffer(image_bytes, np.uint8)
@@ -89,16 +93,20 @@ class SprayAnalyzer:
         sprayed_area = cv2.countNonZero(fluorescence_mask)
         coverage = (sprayed_area / leaf_area * 100) if leaf_area > 0 else 0
         
+        # Crear imagen procesada con áreas de rocío en amarillo
+        processed_image = image.copy()
+        processed_image[fluorescence_mask > 0] = [0, 255, 255]  # Amarillo para áreas con spray
+        
+        # Codificar imagen procesada a base64
+        _, buffer = cv2.imencode('.jpg', processed_image)
+        processed_image_base64 = base64.b64encode(buffer).decode('utf-8')
+        
         # Guardar imágenes de debug
         if save_debug:
-            # Visualización mejorada
-            debug_image = image.copy()
-            debug_image[fluorescence_mask > 0] = [0, 255, 0]  # Verde para áreas con spray
-            
             # Guardar imágenes
             cv2.imwrite("debug_leaf_mask.jpg", leaf_mask)
             cv2.imwrite("debug_fluorescence_mask.jpg", fluorescence_mask)
-            cv2.imwrite("debug_result.jpg", debug_image)
+            cv2.imwrite("debug_result.jpg", processed_image)
             
             # Histograma de azul
             plt.figure(figsize=(10, 6))
@@ -108,7 +116,7 @@ class SprayAnalyzer:
             plt.savefig("debug_histogram.jpg")
             plt.close()
 
-        return round(coverage, 2), leaf_area, sprayed_area
+        return round(coverage, 2), leaf_area, sprayed_area, processed_image_base64
 
     @staticmethod
     def generate_image_id() -> str:
