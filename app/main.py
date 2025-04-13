@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, HTTPException, File, Depends
+from fastapi import FastAPI, UploadFile, HTTPException, File, Depends, Security, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.security import OAuth2PasswordRequestForm
@@ -12,11 +12,12 @@ from app.models.image import ImageAnalysisResponse, BatchAnalysisResponse
 from app.image_processing.analyzer import SprayAnalyzer
 
 # Nuevas importaciones para autenticación
-from app.auth.security import verify_token, create_access_token
+from app.auth.security import verify_token, create_access_token, security, verify_password, oauth2_scheme
 from app.auth.models import Token, UserCreate, User
 from app.auth.database import DatabaseManager
-# En la sección de importaciones de autenticación, añade/verifica:
-from app.auth.security import verify_token, create_access_token, verify_password  # Añadimos verify_password
+from fastapi.security import HTTPAuthorizationCredentials
+from jose import jwt, JWTError
+from app.auth.security import SECRET_KEY, ALGORITHM
 
 # Almacenamiento temporal de resultados (en producción usar Redis o similar)
 analysis_results: Dict[str, dict] = {}
@@ -65,26 +66,44 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
 @app.post("/users", response_model=User)
 async def create_user(
     user: UserCreate,
-    current_user: str = Depends(verify_token) if DatabaseManager.count_users() > 0 else None
+    token: str = Depends(oauth2_scheme) if DatabaseManager.count_users() > 0 else None
 ):
     """
-    Crear un nuevo usuario.
-    El primer usuario se puede crear sin autenticación.
+    Crear un nuevo usuario. El primer usuario se puede crear sin autenticación.
     Los siguientes usuarios requieren autenticación del administrador.
     """
+    # Verificar si ya hay usuarios existentes
+    user_count = DatabaseManager.count_users()
+    
     # Verificar si ya hay 7 usuarios (o el límite configurado)
-    if DatabaseManager.count_users() >= 7:  # Puedes ajustar este número según necesites
+    if user_count >= 7:
         raise HTTPException(
             status_code=400,
             detail="Se ha alcanzado el límite máximo de usuarios permitidos"
         )
     
     # Si no es el primer usuario, verificar que quien lo crea esté autenticado
-    if DatabaseManager.count_users() > 0 and not current_user:
-        raise HTTPException(
-            status_code=401,
-            detail="Se requiere autenticación para crear usuarios adicionales"
-        )
+    if user_count > 0:
+        if not token:
+            raise HTTPException(
+                status_code=401,
+                detail="Se requiere autenticación para crear usuarios adicionales"
+            )
+        
+        try:
+            # Verificar el token
+            payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+            email = payload.get("sub")
+            if not email:
+                raise HTTPException(
+                    status_code=401,
+                    detail="Token inválido"
+                )
+        except Exception:
+            raise HTTPException(
+                status_code=401,
+                detail="Se requiere autenticación válida para crear usuarios adicionales"
+            )
         
     return DatabaseManager.create_user(user)
 

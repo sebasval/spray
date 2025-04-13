@@ -2,8 +2,8 @@ from datetime import datetime, timedelta
 from typing import Optional
 from jose import JWTError, jwt
 from passlib.context import CryptContext
-from fastapi import HTTPException, Security
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi import HTTPException, Security, Depends
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials, OAuth2PasswordBearer
 
 # Configuración de seguridad
 SECRET_KEY = "tu_clave_secreta_muy_segura_cambiame_en_produccion"  # IMPORTANTE: Cambiar en producción
@@ -14,6 +14,7 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24  # 24 horas
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 # Bearer token
 security = HTTPBearer()
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
 def get_password_hash(password: str) -> str:
     """
@@ -41,9 +42,31 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 
-def verify_token(credentials: HTTPAuthorizationCredentials = Security(security)) -> str:
+def verify_token(token: str = Depends(oauth2_scheme)) -> str:
     """
     Verifica que un token JWT sea válido
+    Retorna el email del usuario si el token es válido
+    Lanza una excepción si el token es inválido
+    """
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        email: str = payload.get("sub")
+        if email is None:
+            raise HTTPException(
+                status_code=401,
+                detail="Token inválido"
+            )
+        return email
+    except JWTError:
+        raise HTTPException(
+            status_code=401,
+            detail="Token inválido o expirado"
+        )
+        
+# Mantener la función anterior para compatibilidad
+def verify_token_bearer(credentials: HTTPAuthorizationCredentials = Security(security)) -> str:
+    """
+    Verifica que un token JWT sea válido usando Bearer Auth
     Retorna el email del usuario si el token es válido
     Lanza una excepción si el token es inválido
     """
