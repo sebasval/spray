@@ -93,6 +93,13 @@ class SprayAnalyzer:
         sprayed_area = cv2.countNonZero(fluorescence_mask)
         coverage = (sprayed_area / leaf_area * 100) if leaf_area > 0 else 0
         
+        # Aplicar corrección para cobertura muy alta (>90%)
+        if coverage > 90:
+            # Reducir entre 10-15% dependiendo de qué tan cerca está del 100%
+            correction_factor = 0.10 + (0.05 * (coverage - 90) / 10)
+            sprayed_area = int(sprayed_area * (1 - correction_factor))
+            coverage = (sprayed_area / leaf_area * 100) if leaf_area > 0 else 0
+        
         # Crear imagen procesada con áreas de rocío en amarillo
         processed_image = image.copy()
         processed_image[fluorescence_mask > 0] = [0, 255, 255]  # Amarillo para áreas con spray
