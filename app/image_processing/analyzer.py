@@ -47,8 +47,8 @@ class SprayAnalyzer:
         # Convertir a HSV
         hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
         
-        # Rango para detectar azul brillante
-        lower_blue = np.array([90, 50, 50])
+        # Rango para detectar azul brillante - Parámetros intermedios
+        lower_blue = np.array([95, 60, 60])  # Más permisivo que la versión estricta
         upper_blue = np.array([130, 255, 255])
         
         # Crear máscara para azul
@@ -66,6 +66,64 @@ class SprayAnalyzer:
         mean_intensity = np.mean(hsv[:,:,2][fluorescence_mask > 0]) if cv2.countNonZero(fluorescence_mask) > 0 else 0
         
         return fluorescence_mask, mean_intensity
+
+    @staticmethod
+    def _filter_valid_droplets(fluorescence_mask: np.ndarray, leaf_mask: np.ndarray) -> Tuple[np.ndarray, bool]:
+        """
+        Filtra la máscara de fluorescencia para verificar si contiene gotas reales
+        
+        Returns:
+            Tuple[np.ndarray, bool]: Máscara filtrada y booleano indicando si contiene gotas válidas
+        """
+        # Establecer tamaño mínimo de gota para ser considerada válida
+        MIN_DROPLET_SIZE = 15  # Valor intermedio entre 10 y 25
+        
+        # Etiquetar componentes conectados
+        num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(
+            fluorescence_mask, connectivity=8
+        )
+        
+        # Filtrar componentes demasiado pequeños (posible ruido)
+        filtered_mask = np.zeros_like(fluorescence_mask)
+        valid_droplets_count = 0
+        
+        # Características para validar si son gotas reales
+        total_leaf_area = cv2.countNonZero(leaf_mask)
+        total_fluorescence_area = cv2.countNonZero(fluorescence_mask)
+        
+        # Si la fluorescencia cubre casi toda la hoja pero no tiene componentes distinguibles, probablemente es falso positivo
+        # Umbral más permisivo: 85% en lugar de 70%
+        if total_fluorescence_area > 0.85 * total_leaf_area and num_labels < 5:
+            return filtered_mask, False
+        
+        # Empezamos desde 1 para evitar el fondo (etiqueta 0)
+        for i in range(1, num_labels):
+            area = stats[i, cv2.CC_STAT_AREA]
+            if area >= MIN_DROPLET_SIZE:
+                # Es una gota válida
+                filtered_mask[labels == i] = 255
+                valid_droplets_count += 1
+        
+        # Verificación de gotas: menos estricta (2 en lugar de 3)
+        has_valid_droplets = valid_droplets_count >= 2
+        
+        # Solo aplicar verificación de circularidad si hay muy pocas gotas
+        # y la cobertura total es muy alta (posible falso positivo)
+        if valid_droplets_count == 1 and total_fluorescence_area > 0.4 * total_leaf_area:
+            # Verificar si las formas son circulares (como gotas reales)
+            contours, _ = cv2.findContours(filtered_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            for contour in contours:
+                # El área y perímetro nos ayudan a calcular la circularidad
+                area = cv2.contourArea(contour)
+                perimeter = cv2.arcLength(contour, True)
+                if perimeter > 0:
+                    circularity = 4 * np.pi * area / (perimeter * perimeter)
+                    # Umbral de circularidad menos estricto
+                    if circularity < 0.3:  # No es suficientemente circular
+                        has_valid_droplets = False
+                        break
+                        
+        return filtered_mask, has_valid_droplets
 
     @staticmethod
     def analyze_image(image_bytes: bytes, save_debug: bool = True) -> tuple[float, int, int, Optional[str]]:
@@ -88,10 +146,46 @@ class SprayAnalyzer:
         # Detectar fluorescencia
         fluorescence_mask, threshold_used = SprayAnalyzer._detect_fluorescence(denoised, leaf_mask)
         
+        # Filtrar gotas válidas
+        filtered_mask, has_valid_droplets = SprayAnalyzer._filter_valid_droplets(fluorescence_mask, leaf_mask)
+        
         # Calcular áreas y cobertura
         leaf_area = cv2.countNonZero(leaf_mask)
-        sprayed_area = cv2.countNonZero(fluorescence_mask)
-        coverage = (sprayed_area / leaf_area * 100) if leaf_area > 0 else 0
+        
+        # Calcular cobertura inicial basada en la máscara de fluorescencia original
+        # para casos con cobertura media-alta real
+        initial_sprayed_area = cv2.countNonZero(fluorescence_mask)
+        initial_coverage = (initial_sprayed_area / leaf_area * 100) if leaf_area > 0 else 0
+        
+        # Si no hay gotas válidas pero hay alta señal de fluorescencia, hacer una verificación adicional
+        if not has_valid_droplets:
+            # Si hay una cobertura significativa pero distribuida (posiblemente gotas reales)
+            if 10 < initial_coverage < 90 and initial_sprayed_area > 0:
+                # Examinar la distribución de la fluorescencia
+                # Si hay muchas regiones pequeñas (típico de gotas reales), considerar válido
+                contours, _ = cv2.findContours(fluorescence_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                if len(contours) > 10:  # Muchas regiones pequeñas = patrón típico de gotas
+                    has_valid_droplets = True
+                    filtered_mask = fluorescence_mask.copy()
+            
+            # Si definitivamente no hay gotas válidas, establecer cobertura a 0
+            if not has_valid_droplets:
+                sprayed_area = 0
+                coverage = 0
+            else:
+                sprayed_area = cv2.countNonZero(filtered_mask)
+                coverage = (sprayed_area / leaf_area * 100) if leaf_area > 0 else 0
+        else:
+            sprayed_area = cv2.countNonZero(filtered_mask)
+            coverage = (sprayed_area / leaf_area * 100) if leaf_area > 0 else 0
+            
+            # Verificación para casos extremos
+            if coverage > 70 and not has_valid_droplets:
+                # Análisis adicional antes de rechazar completamente
+                mean_fluorescence = np.mean(image[:,:,0][filtered_mask > 0]) if cv2.countNonZero(filtered_mask) > 0 else 0
+                if mean_fluorescence < 50:  # Bajo valor de azul = posible falso positivo
+                    coverage = 0
+                    sprayed_area = 0
         
         # Aplicar corrección para cobertura muy alta (>90%)
         if coverage > 90:
@@ -102,7 +196,7 @@ class SprayAnalyzer:
         
         # Crear imagen procesada con áreas de rocío en amarillo
         processed_image = image.copy()
-        processed_image[fluorescence_mask > 0] = [0, 255, 255]  # Amarillo para áreas con spray
+        processed_image[filtered_mask > 0] = [0, 255, 255]  # Amarillo para áreas con spray
         
         # Codificar imagen procesada a base64
         _, buffer = cv2.imencode('.jpg', processed_image)
@@ -113,6 +207,7 @@ class SprayAnalyzer:
             # Guardar imágenes
             cv2.imwrite("debug_leaf_mask.jpg", leaf_mask)
             cv2.imwrite("debug_fluorescence_mask.jpg", fluorescence_mask)
+            cv2.imwrite("debug_filtered_mask.jpg", filtered_mask)
             cv2.imwrite("debug_result.jpg", processed_image)
             
             # Histograma de azul
