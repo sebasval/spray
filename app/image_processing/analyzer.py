@@ -47,9 +47,19 @@ class SprayAnalyzer:
         # Convertir a HSV
         hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
         
-        # Rango para detectar azul brillante - Parámetros intermedios
-        lower_blue = np.array([95, 60, 60])  # Más permisivo que la versión estricta
-        upper_blue = np.array([130, 255, 255])
+        # Calcular el valor medio del canal azul (en BGR) en la máscara de hoja
+        # Esto nos ayuda a diferenciar entre imágenes con fluorescencia real y sin ella
+        mean_blue = np.mean(image[:,:,0][leaf_mask > 0]) if cv2.countNonZero(leaf_mask) > 0 else 0
+        
+        # Rango para detectar azul brillante - Usar diferentes parámetros según intensidad media
+        if mean_blue > 70:
+            # Para imágenes con fluorescencia UV real que tienen azul brillante
+            lower_blue = np.array([90, 50, 50])  # Más permisivo para imágenes fluorescentes
+            upper_blue = np.array([140, 255, 255])
+        else:
+            # Para imágenes normales, mantener los parámetros originales más estrictos
+            lower_blue = np.array([95, 65, 65])  # Ligeramente más estricto para evitar falsos positivos
+            upper_blue = np.array([125, 255, 255])
         
         # Crear máscara para azul
         blue_mask = cv2.inRange(hsv, lower_blue, upper_blue)
@@ -157,12 +167,26 @@ class SprayAnalyzer:
         initial_sprayed_area = cv2.countNonZero(fluorescence_mask)
         initial_coverage = (initial_sprayed_area / leaf_area * 100) if leaf_area > 0 else 0
         
-        # Si no hay gotas válidas pero hay alta señal de fluorescencia, hacer una verificación adicional
+        # Verificación especial para imágenes fluorescentes UV
+        # Calcular el promedio del canal azul (BGR) en toda la hoja
+        mean_blue_in_leaf = np.mean(image[:,:,0][leaf_mask > 0]) if cv2.countNonZero(leaf_mask) > 0 else 0
+        is_fluorescent_image = mean_blue_in_leaf > 70  # Umbral para considerar que es una imagen bajo luz UV
+        
+        # Si no hay gotas válidas pero hay señal de fluorescencia, hacer verificación adicional
         if not has_valid_droplets:
-            # Si hay una cobertura significativa pero distribuida (posiblemente gotas reales)
-            if 10 < initial_coverage < 90 and initial_sprayed_area > 0:
-                # Examinar la distribución de la fluorescencia
-                # Si hay muchas regiones pequeñas (típico de gotas reales), considerar válido
+            # Caso especial: Imágenes fluorescentes UV como T2C1P3TMInterno
+            if is_fluorescent_image and initial_sprayed_area > 0:
+                # Verificar si la distribución de fluorescencia es típica de un patrón de gotas
+                contours, _ = cv2.findContours(fluorescence_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                if len(contours) >= 10:  # Muchas regiones pequeñas = patrón típico de gotas
+                    has_valid_droplets = True
+                    filtered_mask = fluorescence_mask.copy()
+                # Si toda la imagen es brillante (azul intenso), probablemente es fluorescente
+                elif mean_blue_in_leaf > 80 and initial_coverage > 20:
+                    has_valid_droplets = True
+                    filtered_mask = fluorescence_mask.copy()
+            # Caso normal: Verificar cobertura significativa pero intermedia
+            elif 10 < initial_coverage < 90 and initial_sprayed_area > 0 and not is_fluorescent_image:
                 contours, _ = cv2.findContours(fluorescence_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
                 if len(contours) > 10:  # Muchas regiones pequeñas = patrón típico de gotas
                     has_valid_droplets = True
@@ -180,12 +204,20 @@ class SprayAnalyzer:
             coverage = (sprayed_area / leaf_area * 100) if leaf_area > 0 else 0
             
             # Verificación para casos extremos
-            if coverage > 70 and not has_valid_droplets:
-                # Análisis adicional antes de rechazar completamente
+            if coverage > 70:
+                # Análisis adicional para alta cobertura
                 mean_fluorescence = np.mean(image[:,:,0][filtered_mask > 0]) if cv2.countNonZero(filtered_mask) > 0 else 0
-                if mean_fluorescence < 50:  # Bajo valor de azul = posible falso positivo
-                    coverage = 0
-                    sprayed_area = 0
+                
+                if is_fluorescent_image:
+                    # Para imágenes bajo luz UV: Si tiene alta componente azul, es fluorescencia válida
+                    if mean_fluorescence < 60:  # Insuficiente azul para ser fluorescencia real
+                        coverage = 0
+                        sprayed_area = 0
+                else:
+                    # Para imágenes normales: Ser más estricto para evitar falsos positivos
+                    if mean_fluorescence < 50 or not has_valid_droplets:
+                        coverage = 0
+                        sprayed_area = 0
         
         # Aplicar corrección para cobertura muy alta (>90%)
         if coverage > 90:
