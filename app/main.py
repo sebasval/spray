@@ -63,10 +63,16 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
     )
     return Token(access_token=access_token)
 
+def get_optional_auth(authorization: Optional[str] = Header(None)) -> Optional[str]:
+    """Extrae el token del header Authorization si existe"""
+    if authorization and authorization.startswith("Bearer "):
+        return authorization.split(" ")[1]
+    return None
+
 @app.post("/users", response_model=User)
 async def create_user(
     user: UserCreate,
-    authorization: Optional[str] = Header(None)
+    token: Optional[str] = Depends(get_optional_auth)
 ):
     """
     Crear un nuevo usuario. El primer usuario se puede crear sin autenticación.
@@ -90,14 +96,7 @@ async def create_user(
                 detail="Se requiere autenticación para crear usuarios adicionales"
             )
         
-        # Extraer token del header Authorization: Bearer <token>
-        if not authorization.startswith("Bearer "):
-            raise HTTPException(
-                status_code=401,
-                detail="Formato de autorización inválido"
-            )
-        
-        token = authorization.split(" ")[1]
+        # Token ya extraído por get_optional_auth
         
         try:
             # Verificar el token
