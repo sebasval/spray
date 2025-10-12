@@ -66,7 +66,7 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
 @app.post("/users", response_model=User)
 async def create_user(
     user: UserCreate,
-    token: str = Depends(oauth2_scheme) if DatabaseManager.count_users() > 0 else None
+    authorization: Optional[str] = None
 ):
     """
     Crear un nuevo usuario. El primer usuario se puede crear sin autenticación.
@@ -84,11 +84,20 @@ async def create_user(
     
     # Si no es el primer usuario, verificar que quien lo crea esté autenticado
     if user_count > 0:
-        if not token:
+        if not authorization:
             raise HTTPException(
                 status_code=401,
                 detail="Se requiere autenticación para crear usuarios adicionales"
             )
+        
+        # Extraer token del header Authorization: Bearer <token>
+        if not authorization.startswith("Bearer "):
+            raise HTTPException(
+                status_code=401,
+                detail="Formato de autorización inválido"
+            )
+        
+        token = authorization.split(" ")[1]
         
         try:
             # Verificar el token
