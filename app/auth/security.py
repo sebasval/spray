@@ -19,13 +19,23 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 def get_password_hash(password: str) -> str:
     """
     Convierte una contraseña en texto plano a un hash
+    Trunca la contraseña si es muy larga (bcrypt limit: 72 bytes)
     """
+    # Truncar a 72 bytes máximo para bcrypt
+    password_bytes = password.encode('utf-8')
+    if len(password_bytes) > 72:
+        password = password_bytes[:72].decode('utf-8', errors='ignore')
     return pwd_context.hash(password)
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """
     Verifica si una contraseña en texto plano coincide con su hash
+    Trunca la contraseña si es muy larga (bcrypt limit: 72 bytes)
     """
+    # Truncar a 72 bytes máximo para bcrypt
+    password_bytes = plain_password.encode('utf-8')
+    if len(password_bytes) > 72:
+        plain_password = password_bytes[:72].decode('utf-8', errors='ignore')
     return pwd_context.verify(plain_password, hashed_password)
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
