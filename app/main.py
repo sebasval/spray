@@ -2,7 +2,7 @@ from fastapi import FastAPI, UploadFile, HTTPException, File, Depends, Security,
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.security import OAuth2PasswordRequestForm
-from typing import List, Dict
+from typing import List, Dict, Optional
 import io
 from openpyxl import Workbook
 from datetime import datetime
