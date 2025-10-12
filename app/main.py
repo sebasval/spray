@@ -90,7 +90,7 @@ async def create_user(
     
     # Si no es el primer usuario, verificar que quien lo crea esté autenticado
     if user_count > 0:
-        if not authorization:
+        if not token:
             raise HTTPException(
                 status_code=401,
                 detail="Se requiere autenticación para crear usuarios adicionales"
