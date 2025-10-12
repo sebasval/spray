@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, HTTPException, File, Depends, Security, Request
+from fastapi import FastAPI, UploadFile, HTTPException, File, Depends, Security, Request, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.security import OAuth2PasswordRequestForm
@@ -66,7 +66,7 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
 @app.post("/users", response_model=User)
 async def create_user(
     user: UserCreate,
-    authorization: Optional[str] = None
+    authorization: Optional[str] = Header(None)
 ):
     """
     Crear un nuevo usuario. El primer usuario se puede crear sin autenticación.
