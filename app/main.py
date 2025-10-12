@@ -64,7 +64,10 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
     return Token(access_token=access_token)
 
 @app.post("/users", response_model=User)
-async def create_user(user: UserCreate):
+async def create_user(
+    user: UserCreate,
+    current_user: Optional[str] = None
+):
     """
     Crear un nuevo usuario. El primer usuario se puede crear sin autenticación.
     Los siguientes usuarios requieren autenticación del administrador.
@@ -79,8 +82,12 @@ async def create_user(user: UserCreate):
             detail="Se ha alcanzado el límite máximo de usuarios permitidos"
         )
     
-    # Por ahora, permitir crear usuarios sin autenticación
-    # TODO: Implementar autenticación para usuarios adicionales
+    # Si no es el primer usuario, verificar que quien lo crea esté autenticado
+    if user_count > 0 and not current_user:
+        raise HTTPException(
+            status_code=401,
+            detail="Se requiere autenticación para crear usuarios adicionales"
+        )
     
     return DatabaseManager.create_user(user)
 
