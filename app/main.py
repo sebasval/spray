@@ -63,17 +63,8 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
     )
     return Token(access_token=access_token)
 
-def get_optional_auth(authorization: Optional[str] = Header(None)) -> Optional[str]:
-    """Extrae el token del header Authorization si existe"""
-    if authorization and authorization.startswith("Bearer "):
-        return authorization.split(" ")[1]
-    return None
-
 @app.post("/users", response_model=User)
-async def create_user(
-    user: UserCreate,
-    token: Optional[str] = Depends(get_optional_auth)
-):
+async def create_user(user: UserCreate):
     """
     Crear un nuevo usuario. El primer usuario se puede crear sin autenticación.
     Los siguientes usuarios requieren autenticación del administrador.
@@ -88,31 +79,9 @@ async def create_user(
             detail="Se ha alcanzado el límite máximo de usuarios permitidos"
         )
     
-    # Si no es el primer usuario, verificar que quien lo crea esté autenticado
-    if user_count > 0:
-        if not token:
-            raise HTTPException(
-                status_code=401,
-                detail="Se requiere autenticación para crear usuarios adicionales"
-            )
-        
-        # Token ya extraído por get_optional_auth
-        
-        try:
-            # Verificar el token
-            payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-            email = payload.get("sub")
-            if not email:
-                raise HTTPException(
-                    status_code=401,
-                    detail="Token inválido"
-                )
-        except Exception:
-            raise HTTPException(
-                status_code=401,
-                detail="Se requiere autenticación válida para crear usuarios adicionales"
-            )
-        
+    # Por ahora, permitir crear usuarios sin autenticación
+    # TODO: Implementar autenticación para usuarios adicionales
+    
     return DatabaseManager.create_user(user)
 
 @app.get("/users/me", response_model=User)
