@@ -10,32 +10,22 @@ SECRET_KEY = "tu_clave_secreta_muy_segura_cambiame_en_produccion"  # IMPORTANTE:
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24  # 24 horas
 
-# Contexto para hashear passwords
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# Contexto para hashear passwords - usar pbkdf2_sha256 en lugar de bcrypt
+pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
 # Bearer token
 security = HTTPBearer()
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
 def get_password_hash(password: str) -> str:
     """
-    Convierte una contraseña en texto plano a un hash
-    Trunca la contraseña si es muy larga (bcrypt limit: 72 bytes)
+    Convierte una contraseña en texto plano a un hash usando pbkdf2_sha256
     """
-    # Truncar a 72 bytes máximo para bcrypt
-    password_bytes = password.encode('utf-8')
-    if len(password_bytes) > 72:
-        password = password_bytes[:72].decode('utf-8', errors='ignore')
     return pwd_context.hash(password)
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """
-    Verifica si una contraseña en texto plano coincide con su hash
-    Trunca la contraseña si es muy larga (bcrypt limit: 72 bytes)
+    Verifica si una contraseña en texto plano coincide con su hash usando pbkdf2_sha256
     """
-    # Truncar a 72 bytes máximo para bcrypt
-    password_bytes = plain_password.encode('utf-8')
-    if len(password_bytes) > 72:
-        plain_password = password_bytes[:72].decode('utf-8', errors='ignore')
     return pwd_context.verify(plain_password, hashed_password)
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
