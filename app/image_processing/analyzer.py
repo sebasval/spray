@@ -12,9 +12,9 @@ class SprayAnalyzer:
     """
     
     # Parámetros optimizados
-    MIN_DROPLET_AREA = 10  # Área mínima de una gota en píxeles
+    MIN_DROPLET_AREA = 5  # Área mínima de una gota en píxeles (reducido para capturar gotas pequeñas)
     MAX_DROPLET_AREA_RATIO = 0.05  # Máximo 5% del área de hoja por gota individual
-    MIN_DROPLETS_COUNT = 3  # Mínimo de gotas para considerar válido
+    MIN_DROPLETS_COUNT = 1  # Mínimo de gotas para considerar válido (reducido para mayor sensibilidad)
     
     @staticmethod
     def _detect_leaf_mask(image: np.ndarray) -> np.ndarray:
@@ -106,12 +106,13 @@ class SprayAnalyzer:
         # Calcular umbral adaptativo solo dentro de la hoja
         blue_excess_in_leaf = blue_excess_norm[leaf_mask > 0]
         if blue_excess_in_leaf.size > 0:
-            # Usar percentil 90 como umbral (solo el 10% más azul)
-            threshold_excess = np.percentile(blue_excess_in_leaf, 90)
-            # Asegurar umbral mínimo razonable
-            threshold_excess = max(threshold_excess, 100)
+            # Usar percentil 85 como umbral (más sensible que 90)
+            # Si hay muchas gotas, el percentil será más alto naturalmente
+            threshold_excess = np.percentile(blue_excess_in_leaf, 85)
+            # Umbral mínimo más bajo para capturar gotas menos intensas
+            threshold_excess = max(threshold_excess, 80)
         else:
-            threshold_excess = 100
+            threshold_excess = 80
         
         excess_mask = (blue_excess_norm > threshold_excess).astype(np.uint8) * 255
         
@@ -134,14 +135,17 @@ class SprayAnalyzer:
         blue_ratio = b_float / (r_float + g_float + 1.0)
         blue_ratio_norm = np.clip(blue_ratio * 100, 0, 255).astype(np.uint8)
         
-        # Umbral para ratio (azul debe ser al menos 1.3x más que promedio de R+G)
-        ratio_mask = (blue_ratio > 1.3).astype(np.uint8) * 255
+        # Umbral para ratio (azul debe ser al menos 1.2x más que promedio de R+G)
+        # Reducido de 1.3 a 1.2 para mayor sensibilidad
+        ratio_mask = (blue_ratio > 1.2).astype(np.uint8) * 255
         
         # ========================================
-        # PASO 5: Combinar máscaras de manera ESTRICTA
+        # PASO 5: Combinar máscaras de manera INTELIGENTE
         # ========================================
-        # Requiere que al menos 2 de las 4 detecciones coincidan
-        # Esto reduce falsos positivos significativamente
+        # Sistema de votación flexible:
+        # - Si HSV detecta azul cian (método más confiable), aceptar con 1 voto adicional
+        # - Si no hay HSV pero hay 2+ otros métodos, también aceptar
+        # Esto balancea sensibilidad y precisión
         
         # Convertir a binario para contar
         mask1 = (cyan_mask_hsv > 0).astype(np.uint8)
@@ -152,8 +156,18 @@ class SprayAnalyzer:
         # Suma de coincidencias
         vote_sum = mask1 + mask2 + mask3 + mask4
         
-        # Requiere al menos 2 votos
-        combined_mask = (vote_sum >= 2).astype(np.uint8) * 255
+        # Regla flexible: 
+        # - Si HSV (mask1) está presente Y al menos otro método → aceptar
+        # - O si hay 2+ métodos sin HSV → aceptar
+        # - O si hay 3+ métodos → aceptar (muy confiable)
+        hsv_present = mask1 > 0
+        other_votes = (mask2 + mask3 + mask4) > 0
+        strong_consensus = vote_sum >= 3
+        
+        combined_mask = (
+            (hsv_present & other_votes) |  # HSV + otro método
+            (vote_sum >= 2)  # 2+ métodos sin importar cuáles
+        ).astype(np.uint8) * 255
         
         # ========================================
         # PASO 6: Restringir a la hoja y filtrar por brillo
@@ -232,9 +246,9 @@ class SprayAnalyzer:
             g_mean = float(np.mean(image[:, :, 1][droplet_pixels]))
             r_mean = float(np.mean(image[:, :, 2][droplet_pixels]))
             
-            # Verificar que el azul domine
+            # Verificar que el azul domine (umbral más permisivo)
             blue_dominance = b_mean / (0.5 * (g_mean + r_mean) + 1.0)
-            if blue_dominance < 1.2:
+            if blue_dominance < 1.15:  # Reducido de 1.2 a 1.15 para mayor sensibilidad
                 continue
             
             # Calcular circularidad (gotas tienden a ser circulares)
@@ -278,10 +292,11 @@ class SprayAnalyzer:
         is_valid = True
         reason = 'valid'
         
-        # 1. Debe haber suficientes gotas
+        # 1. Debe haber suficientes gotas o cobertura significativa
         if len(valid_droplets) < SprayAnalyzer.MIN_DROPLETS_COUNT:
-            # Excepción: Si hay pocas gotas pero cubren área significativa
-            if validation_stats['coverage_ratio'] < 0.05:
+            # Si hay cobertura significativa (>2%), aceptar aunque haya pocas gotas
+            # (puede ser una gota grande o varias gotas que se fusionaron)
+            if validation_stats['coverage_ratio'] < 0.02:  # Reducido de 0.05 a 0.02
                 is_valid = False
                 reason = 'insufficient_droplets'
         
@@ -298,7 +313,8 @@ class SprayAnalyzer:
             validation_stats['avg_circularity'] = float(avg_circularity)
             
             # Si la circularidad es muy baja y hay pocas gotas, probablemente no son gotas
-            if avg_circularity < 0.2 and len(valid_droplets) < 10:
+            # Pero ser más permisivo: solo rechazar si es muy bajo (<0.15) y muy pocas gotas
+            if avg_circularity < 0.15 and len(valid_droplets) < 5:  # Más estricto solo en casos extremos
                 is_valid = False
                 reason = 'low_circularity'
         
@@ -308,7 +324,8 @@ class SprayAnalyzer:
             validation_stats['avg_blue_dominance'] = float(avg_blue_dominance)
             
             # Si el azul no domina lo suficiente, no son gotas azul cian
-            if avg_blue_dominance < 1.3:
+            # Umbral más permisivo para capturar gotas reales
+            if avg_blue_dominance < 1.25:  # Reducido de 1.3 a 1.25
                 is_valid = False
                 reason = 'insufficient_blue_dominance'
         
@@ -355,6 +372,12 @@ class SprayAnalyzer:
         if is_valid:
             sprayed_area = cv2.countNonZero(filtered_mask)
             coverage_percentage = (sprayed_area / leaf_area * 100.0) if leaf_area > 0 else 0.0
+            
+            # Validación final: Si el coverage es muy bajo (<0.5%), considerar que no hay gotas
+            # Esto evita falsos positivos mínimos
+            if coverage_percentage < 0.5:
+                sprayed_area = 0
+                coverage_percentage = 0.0
         else:
             # No se detectaron gotas válidas
             sprayed_area = 0
