@@ -133,30 +133,42 @@ async def health_check():
 @app.post("/analyze", response_model=ImageAnalysisResponse)
 async def analyze_single_image(
     file: UploadFile,
-    current_user: str = Depends(verify_token)  # Añadido requerimiento de autenticación
+    current_user: str = Depends(verify_token)
 ):
+    """
+    Analiza una imagen para detectar cobertura de spray usando fluorescencia UV.
+    Combina detección por brillo relativo y por color cian/azul.
+    """
     if not file.content_type.startswith('image/'):
         raise HTTPException(400, detail="El archivo debe ser una imagen")
     try:
         contents = await file.read()
-        analyzer = SprayAnalyzer()
-        coverage, total_area, sprayed_area, processed_image = analyzer.analyze_image(contents)
+        coverage, total_area, sprayed_area, processed_image = SprayAnalyzer.analyze_image(
+            contents,
+            save_debug=True
+        )
         return ImageAnalysisResponse(
             coverage_percentage=round(coverage, 2),
             total_area=total_area,
             sprayed_area=sprayed_area,
-            image_id=analyzer.generate_image_id(),
+            image_id=SprayAnalyzer.generate_image_id(),
             file_name=file.filename,
             processed_image=processed_image
         )
     except Exception as e:
-        raise HTTPException(500, detail=str(e))
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(500, detail=f"Error al analizar imagen: {str(e)}")
 
 @app.post("/analyze-batch", response_model=BatchAnalysisResponse)
 async def analyze_multiple_images(
     files: List[UploadFile] = File(...),
-    current_user: str = Depends(verify_token)  # Añadido requerimiento de autenticación
+    current_user: str = Depends(verify_token)
 ):
+    """
+    Analiza múltiples imágenes para detectar cobertura de spray usando fluorescencia UV.
+    Combina detección por brillo relativo y por color cian/azul.
+    """
     # Validar número máximo de archivos
     MAX_FILES = 100
     MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB por archivo
@@ -188,13 +200,15 @@ async def analyze_multiple_images(
                 )
                 continue
                 
-            analyzer = SprayAnalyzer()
-            coverage, total_area, sprayed_area, processed_image = analyzer.analyze_image(contents)
+            coverage, total_area, sprayed_area, processed_image = SprayAnalyzer.analyze_image(
+                contents,
+                save_debug=False
+            )
             analysis = ImageAnalysisResponse(
                 coverage_percentage=round(coverage, 2),
                 total_area=total_area,
                 sprayed_area=sprayed_area,
-                image_id=analyzer.generate_image_id(),
+                image_id=SprayAnalyzer.generate_image_id(),
                 file_name=file.filename,
                 processed_image=processed_image
             )

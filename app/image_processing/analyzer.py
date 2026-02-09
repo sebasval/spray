@@ -8,21 +8,21 @@ from app.models.image import ImageAnalysisResponse
 
 
 class SprayAnalyzer:
-    # Parámetros ajustados para fluorescencia azul
-    MIN_SPRAY_AREA = 5  # Mantenemos un mínimo absoluto
+    # Parámetros ajustados para fluorescencia
+    MIN_SPRAY_AREA = 5  # Mínimo absoluto de área para considerar una gota
     MORPH_KERNEL_SIZE = 3
     
     @staticmethod
     def _detect_leaf_mask(image: np.ndarray) -> np.ndarray:
         """
-        Detecta la máscara de la hoja usando múltiples canales
+        Detecta la máscara de la hoja usando múltiples canales.
         Ajustado para mejorar la robustez en los bordes y evitar el fondo.
         """
         hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         
         # Umbralización simple para eliminar el fondo negro obvio
-        _, base_mask = cv2.threshold(gray, 15, 255, cv2.THRESH_BINARY)  # Umbral más bajo para asegurar captura
+        _, base_mask = cv2.threshold(gray, 15, 255, cv2.THRESH_BINARY)
 
         # Umbral Otsu en el canal de Saturación (ayuda con los bordes de la hoja)
         sat = hsv[:, :, 1]
@@ -32,7 +32,7 @@ class SprayAnalyzer:
         combined_mask = cv2.bitwise_or(base_mask, sat_otsu_mask)
         
         # Operaciones morfológicas para limpiar y conectar la máscara
-        kernel = np.ones((7, 7), np.uint8)  # Kernel más grande para una mejor conexión
+        kernel = np.ones((7, 7), np.uint8)
         cleaned_mask = cv2.morphologyEx(combined_mask, cv2.MORPH_CLOSE, kernel, iterations=2)
         cleaned_mask = cv2.morphologyEx(cleaned_mask, cv2.MORPH_OPEN, kernel, iterations=2)
 
@@ -43,57 +43,71 @@ class SprayAnalyzer:
             
         largest_contour = max(contours, key=cv2.contourArea)
         final_mask = np.zeros_like(cleaned_mask)
-        cv2.drawContours(final_mask, [largest_contour], -1, 255, -1)  # Rellenar el contorno más grande
+        cv2.drawContours(final_mask, [largest_contour], -1, 255, -1)
 
         return final_mask
 
     @staticmethod
     def _detect_fluorescence(image: np.ndarray, leaf_mask: np.ndarray) -> Tuple[np.ndarray, float]:
         """
-        Detecta la fluorescencia CÍAN/AZUL, rechazando PÚRPURA.
-        Ajustado para ser más estricto y solo capturar azules/cian brillantes.
+        Detecta la fluorescencia del spray usando OpenCV.
+        Combina dos estrategias:
+          1) Detección por BRILLO: áreas significativamente más brillantes que el fondo
+             de la hoja (captura spray blanco/brillante con baja saturación).
+          2) Detección por COLOR: áreas con tono cian/azul y saturación moderada
+             (captura spray con fluorescencia azulada).
         """
         hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+        val_channel = hsv[:, :, 2]
 
-        # 1) Detección por rango HSV (Cian/Azul) - Rango de matiz más estricto
-        # El rango ahora se enfoca más en el cian-azul puro, evitando los azules que tiran a púrpura
-        lower_cyan_blue = np.array([85, 50, 60])  # Saturación y Valor más altos para exigir brillo
-        upper_cyan_blue = np.array([125, 255, 255])  # Rango de matiz ligeramente más estrecho en el extremo superior
-        hsv_mask = cv2.inRange(hsv, lower_cyan_blue, upper_cyan_blue)
+        # ================================================================
+        # MÉTODO 1: Detección por BRILLO RELATIVO (spray blanco/brillante)
+        # ================================================================
+        # El spray fluorescente aparece como áreas mucho más brillantes que
+        # el color base de la hoja. Calculamos un umbral adaptativo.
+        leaf_pixels_val = val_channel[leaf_mask > 0]
 
-        # 2) Filtro BGR para Cían/Azul dominante - Requisitos más estrictos
+        if len(leaf_pixels_val) > 0:
+            median_val = float(np.median(leaf_pixels_val))
+            std_val = float(np.std(leaf_pixels_val))
+            # Umbral: mediana + 0.8*std, pero mínimo 120 para evitar falsos positivos
+            brightness_threshold = max(median_val + 0.8 * std_val, 120)
+            brightness_mask = (val_channel > brightness_threshold).astype(np.uint8) * 255
+        else:
+            brightness_mask = np.zeros_like(leaf_mask)
+
+        # ================================================================
+        # MÉTODO 2: Detección por COLOR (cian/azul con saturación moderada)
+        # ================================================================
+        # Rango HSV para tonos cian/azul (saturación más permisiva)
+        lower_cyan_blue = np.array([85, 30, 50])
+        upper_cyan_blue = np.array([130, 255, 255])
+        hsv_color_mask = cv2.inRange(hsv, lower_cyan_blue, upper_cyan_blue)
+
+        # Filtro BGR: canales azul/verde dominan sobre rojo
         b = image[:, :, 0].astype(np.float32)
         g = image[:, :, 1].astype(np.float32)
         r = image[:, :, 2].astype(np.float32)
-        
-        # Requerir que el azul (o verde para cian) sea SIGNIFICATIVAMENTE dominante
-        # Esto filtra los "azules" tenues o mezclados con mucho rojo/púrpura
-        cyan_check = (g > r + 10) & (b > r + 5)  # Verde debe ser notablemente mayor que rojo, y azul mayor que rojo
-        blue_check = (b > r + 20) & (b > g + 10)  # Azul debe ser MUCHO mayor que rojo y verde
-        
-        bgr_mask = ((cyan_check | blue_check)).astype(np.uint8) * 255
 
-        # 3) Requisitos mínimos de valor/saturación para evitar sombras y ruido oscuro
-        # Estos umbrales se han elevado para asegurar que solo los píxeles más BRILANTES y SATURADOS pasen
-        sat_ok = (hsv[:, :, 1] > 60).astype(np.uint8) * 255  # Exige alta saturación
-        val_ok = (hsv[:, :, 2] > 70).astype(np.uint8) * 255  # Exige alto brillo
+        cyan_check = (g > r + 5) & (b > r)
+        blue_check = (b > r + 15) & (b > g + 5)
+        bgr_mask = (cyan_check | blue_check).astype(np.uint8) * 255
 
-        # 4) Combinar máscaras: DEBE pasar HSV, BGR, y tener suficiente brillo/saturación
-        combined = cv2.bitwise_and(hsv_mask, bgr_mask)
-        combined = cv2.bitwise_and(combined, sat_ok)
-        combined = cv2.bitwise_and(combined, val_ok)
-        
-        # La máscara de fluorescencia final DEBE estar dentro de la máscara de la hoja
+        color_mask = cv2.bitwise_and(hsv_color_mask, bgr_mask)
+
+        # ================================================================
+        # COMBINAR ambos métodos
+        # ================================================================
+        combined = cv2.bitwise_or(brightness_mask, color_mask)
+
+        # La máscara final DEBE estar dentro de la máscara de la hoja
         fluorescence_mask = cv2.bitwise_and(combined, leaf_mask)
 
-        # 5) Limpieza morfológica:
-        # Se ha añadido una operación de apertura más agresiva para eliminar pequeños ruidos.
+        # Limpieza morfológica
         kernel_small = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
         kernel_medium = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-        
-        # Apertura: Elimina pequeños objetos y aísla las gotas
+
         fluorescence_mask = cv2.morphologyEx(fluorescence_mask, cv2.MORPH_OPEN, kernel_small, iterations=2)
-        # Cierre: Conecta pequeñas brechas en las gotas restantes
         fluorescence_mask = cv2.morphologyEx(fluorescence_mask, cv2.MORPH_CLOSE, kernel_medium, iterations=1)
         fluorescence_mask = cv2.dilate(fluorescence_mask, kernel_small, iterations=1)
 
@@ -115,7 +129,7 @@ class SprayAnalyzer:
         if total_fluorescence_area == 0:
             return np.zeros_like(fluorescence_mask), False
 
-        MIN_DROPLET_SIZE = SprayAnalyzer.MIN_SPRAY_AREA  # Usamos el valor de clase, 5
+        MIN_DROPLET_SIZE = SprayAnalyzer.MIN_SPRAY_AREA
 
         num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(
             fluorescence_mask, connectivity=8
@@ -137,7 +151,10 @@ class SprayAnalyzer:
     @staticmethod
     def analyze_image(image_bytes: bytes, save_debug: bool = True) -> tuple[float, int, int, Optional[str]]:
         """
-        Analiza una imagen para detectar cobertura de spray usando fluorescencia UV
+        Analiza una imagen para detectar cobertura de spray usando fluorescencia UV.
+        
+        Combina detección por brillo relativo (áreas blancas/brillantes) y por color
+        (cian/azul) para máxima cobertura de detección.
         """
         nparr = np.frombuffer(image_bytes, np.uint8)
         image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
@@ -145,7 +162,7 @@ class SprayAnalyzer:
         if image is None:
             return 0.0, 0, 0, None
             
-        denoised = cv2.fastNlMeansDenoisingColored(image, None, 10, 10, 7, 21)
+        denoised = cv2.fastNlMeansDenoisingColored(image, None, 3, 3, 7, 21)
         
         # 2. Detección de Hoja
         leaf_mask = SprayAnalyzer._detect_leaf_mask(denoised)
@@ -156,7 +173,7 @@ class SprayAnalyzer:
             processed_image_base64 = base64.b64encode(buffer).decode('utf-8')
             return 0.0, 0, 0, processed_image_base64
             
-        # 3. Detección de Fluorescencia (filtra por color CÍAN vs PÚRPURA y limita a la hoja)
+        # 3. Detección de Fluorescencia (brillo + color, limitada a la hoja)
         fluorescence_mask, _ = SprayAnalyzer._detect_fluorescence(denoised, leaf_mask)
         
         # 4. Filtrado de Gotas Válidas (filtra por TAMAÑO/ruido)
@@ -182,7 +199,7 @@ class SprayAnalyzer:
         # 8. Guardar Debug
         if save_debug:
             cv2.imwrite("debug_leaf_mask.jpg", leaf_mask)
-            cv2.imwrite("debug_fluorescence_mask_pre_filter.jpg", fluorescence_mask) 
+            cv2.imwrite("debug_fluorescence_mask.jpg", fluorescence_mask) 
             cv2.imwrite("debug_filtered_mask.jpg", filtered_mask)       
             cv2.imwrite("debug_result.jpg", processed_image)
             
