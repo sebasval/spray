@@ -70,8 +70,8 @@ class SprayAnalyzer:
         if len(leaf_pixels_val) > 0:
             median_val = float(np.median(leaf_pixels_val))
             std_val = float(np.std(leaf_pixels_val))
-            # Umbral: mediana + 0.8*std, pero mínimo 120 para evitar falsos positivos
-            brightness_threshold = max(median_val + 0.8 * std_val, 120)
+            # Umbral: mediana + 1.0*std, pero mínimo 120 para evitar falsos positivos
+            brightness_threshold = max(median_val + 1.0 * std_val, 120)
             brightness_mask = (val_channel > brightness_threshold).astype(np.uint8) * 255
         else:
             brightness_mask = np.zeros_like(leaf_mask)
@@ -79,8 +79,8 @@ class SprayAnalyzer:
         # ================================================================
         # MÉTODO 2: Detección por COLOR (cian/azul con saturación moderada)
         # ================================================================
-        # Rango HSV para tonos cian/azul (saturación más permisiva)
-        lower_cyan_blue = np.array([85, 30, 50])
+        # Rango HSV para tonos cian/azul (con brillo mínimo de 80 para evitar falsos en zonas oscuras)
+        lower_cyan_blue = np.array([85, 30, 80])
         upper_cyan_blue = np.array([130, 255, 255])
         hsv_color_mask = cv2.inRange(hsv, lower_cyan_blue, upper_cyan_blue)
 
