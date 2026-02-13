@@ -19,6 +19,9 @@ from fastapi.security import HTTPAuthorizationCredentials
 from jose import jwt, JWTError
 from app.auth.security import SECRET_KEY, ALGORITHM
 
+# WhatsApp Bot
+from app.whatsapp_bot import router as whatsapp_router
+
 # Almacenamiento temporal de resultados (en producción usar Redis o similar)
 analysis_results: Dict[str, dict] = {}
 
@@ -37,6 +40,9 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["*"]  # Añade esta línea
 )
+
+# WhatsApp Bot routes
+app.include_router(whatsapp_router)
 
 # Rutas de autenticación
 @app.post("/token", response_model=Token)

@@ -10,3 +10,4 @@ passlib[bcrypt]
 pydantic[email]
 python-multipart
 matplotlib
+httpx
