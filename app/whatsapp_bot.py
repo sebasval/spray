@@ -60,10 +60,11 @@ async def download_whatsapp_media(media_id: str) -> bytes:
     async with httpx.AsyncClient() as client:
         # Step 1: Get media URL
         resp = await client.get(
-            f"https://graph.facebook.com/v21.0/{media_id}",
+            f"https://graph.facebook.com/v22.0/{media_id}",
             headers={"Authorization": f"Bearer {WHATSAPP_TOKEN}"},
             timeout=15,
         )
+        logger.info(f"Media URL response: {resp.status_code} {resp.text[:200]}")
         resp.raise_for_status()
         media_url = resp.json()["url"]
 
@@ -73,6 +74,7 @@ async def download_whatsapp_media(media_id: str) -> bytes:
             headers={"Authorization": f"Bearer {WHATSAPP_TOKEN}"},
             timeout=30,
         )
+        logger.info(f"Media download response: {resp.status_code}, size: {len(resp.content)} bytes")
         resp.raise_for_status()
         return resp.content
 
@@ -81,7 +83,7 @@ async def send_whatsapp_message(to: str, text: str):
     """Send a text message via WhatsApp Cloud API."""
     async with httpx.AsyncClient() as client:
         resp = await client.post(
-            f"https://graph.facebook.com/v21.0/{PHONE_NUMBER_ID}/messages",
+            f"https://graph.facebook.com/v22.0/{PHONE_NUMBER_ID}/messages",
             headers={
                 "Authorization": f"Bearer {WHATSAPP_TOKEN}",
                 "Content-Type": "application/json",
@@ -172,7 +174,7 @@ async def handle_image_message(sender: str, message: dict):
         logger.info(f"Analysis sent to {sender}: {coverage}% coverage")
 
     except Exception as ex:
-        logger.error(f"Error analyzing image from {sender}: {ex}", exc_info=True)
+        logger.error(f"Error analyzing image from {sender}: {type(ex).__name__}: {ex}", exc_info=True)
         await send_whatsapp_message(
             sender,
             "❌ Hubo un error al analizar la imagen. "
