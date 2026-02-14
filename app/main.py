@@ -1,6 +1,6 @@
 from fastapi import FastAPI, UploadFile, HTTPException, File, Depends, Security, Request, Header
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, HTMLResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from typing import List, Dict, Optional
 import io
@@ -128,6 +128,42 @@ async def read_users_me(current_user: str = Depends(verify_token)):
 @app.get("/")
 async def read_root():
     return {"message": "Bienvenido a Spray Analyzer API"}
+
+@app.get("/privacy", response_class=HTMLResponse)
+async def privacy_policy():
+    return """<!DOCTYPE html>
+<html lang="es">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Política de Privacidad - Spray Analyzer</title>
+<style>body{font-family:Arial,sans-serif;max-width:800px;margin:40px auto;padding:0 20px;color:#333;line-height:1.6}h1{color:#2e7d32}h2{color:#388e3c;margin-top:30px}</style>
+</head><body>
+<h1>Política de Privacidad — Spray Analyzer</h1>
+<p><strong>Última actualización:</strong> 14 de febrero de 2026</p>
+
+<h2>1. Información que recopilamos</h2>
+<p>Spray Analyzer recopila únicamente las imágenes que los usuarios envían voluntariamente a través de WhatsApp para su análisis de cobertura de rociado agrícola. También recopilamos el número de teléfono del remitente para poder enviar la respuesta.</p>
+
+<h2>2. Uso de la información</h2>
+<p>Las imágenes recibidas se procesan exclusivamente para generar un análisis de cobertura de rociado mediante visión por computador. No utilizamos las imágenes para ningún otro propósito.</p>
+
+<h2>3. Almacenamiento y retención</h2>
+<p>Las imágenes se procesan en tiempo real y <strong>no se almacenan permanentemente</strong> en nuestros servidores. Los datos del análisis se mantienen temporalmente durante la sesión activa.</p>
+
+<h2>4. Compartir información</h2>
+<p>No compartimos, vendemos ni transferimos la información personal de los usuarios a terceros.</p>
+
+<h2>5. Seguridad</h2>
+<p>Utilizamos medidas de seguridad estándar de la industria, incluyendo cifrado en tránsito (HTTPS) y autenticación mediante tokens JWT.</p>
+
+<h2>6. Derechos del usuario</h2>
+<p>Los usuarios pueden solicitar la eliminación de cualquier dato asociado a su cuenta contactándonos directamente.</p>
+
+<h2>7. Contacto</h2>
+<p>Para consultas sobre privacidad: <strong>admin@almagricola.com</strong></p>
+
+<h2>8. Cambios a esta política</h2>
+<p>Nos reservamos el derecho de actualizar esta política. Los cambios serán publicados en esta misma página.</p>
+</body></html>"""
 
 @app.get("/health")
 async def health_check():
