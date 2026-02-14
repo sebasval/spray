@@ -100,6 +100,45 @@ async def send_whatsapp_message(to: str, text: str):
         return resp.json()
 
 
+async def upload_whatsapp_media(image_bytes: bytes, mime_type: str = "image/png") -> str:
+    """Upload media to WhatsApp Cloud API and return media ID."""
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            f"https://graph.facebook.com/v22.0/{PHONE_NUMBER_ID}/media",
+            headers={"Authorization": f"Bearer {WHATSAPP_TOKEN}"},
+            data={"messaging_product": "whatsapp", "type": mime_type},
+            files={"file": ("analysis.png", image_bytes, mime_type)},
+            timeout=30,
+        )
+        logger.info(f"Media upload response: {resp.status_code} {resp.text[:200]}")
+        resp.raise_for_status()
+        return resp.json()["id"]
+
+
+async def send_whatsapp_image(to: str, media_id: str, caption: str = ""):
+    """Send an image message via WhatsApp Cloud API."""
+    async with httpx.AsyncClient() as client:
+        payload = {
+            "messaging_product": "whatsapp",
+            "to": to,
+            "type": "image",
+            "image": {"id": media_id},
+        }
+        if caption:
+            payload["image"]["caption"] = caption
+        resp = await client.post(
+            f"https://graph.facebook.com/v22.0/{PHONE_NUMBER_ID}/messages",
+            headers={
+                "Authorization": f"Bearer {WHATSAPP_TOKEN}",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+            timeout=15,
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+
 # --- Message handlers ---
 
 async def handle_text_message(sender: str, message: dict):
@@ -161,15 +200,28 @@ async def handle_image_message(sender: str, message: dict):
         else:
             quality = "❌ Cobertura baja, se recomienda re-aplicar"
 
-        # Send results
-        await send_whatsapp_message(
-            sender,
+        # Build result text
+        result_text = (
             f"🌿 *Resultado del Análisis*\n\n"
             f"📊 *Cobertura:* {coverage}%\n"
             f"📐 *Área total:* {total_area:,} px\n"
             f"💧 *Área rociada:* {sprayed_area:,} px\n\n"
             f"{quality}"
         )
+
+        # Send processed image if available
+        processed_image_b64 = result.get("processed_image")
+        if processed_image_b64:
+            try:
+                import base64
+                image_data = base64.b64decode(processed_image_b64)
+                media_id = await upload_whatsapp_media(image_data, "image/png")
+                await send_whatsapp_image(sender, media_id, result_text)
+            except Exception as img_ex:
+                logger.error(f"Error sending processed image: {img_ex}", exc_info=True)
+                await send_whatsapp_message(sender, result_text)
+        else:
+            await send_whatsapp_message(sender, result_text)
 
         logger.info(f"Analysis sent to {sender}: {coverage}% coverage")
 
