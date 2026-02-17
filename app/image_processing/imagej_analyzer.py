@@ -115,29 +115,31 @@ def detect_leaf_mask(gray, background_threshold=30):
         return np.zeros_like(gray)
     
     image_area = gray.shape[0] * gray.shape[1]
-    min_area = image_area * 0.005  # at least 0.5% of image
+    min_area = image_area * 0.003  # at least 0.3% of image (catch smaller leaves)
     valid = [c for c in contours if cv2.contourArea(c) >= min_area]
     
     if not valid:
         return np.zeros_like(gray)
     
-    largest = max(valid, key=cv2.contourArea)
+    # Draw ALL valid contours, not just the largest
+    # This handles multiple leaves, petals, flowers in one image
     mask = np.zeros_like(gray)
-    cv2.drawContours(mask, [largest], -1, 255, -1)
+    for contour in valid:
+        cv2.drawContours(mask, [contour], -1, 255, -1)
     
-    # Safety check: if mask is >90% of image, try stricter threshold
+    # Safety check: if mask is >85% of image, background detection failed
     leaf_pct = cv2.countNonZero(mask) / image_area * 100
     if leaf_pct > 85:
-        logger.warning(f"Leaf mask too large ({leaf_pct:.1f}%), retrying with threshold=80")
+        logger.warning(f"Object mask too large ({leaf_pct:.1f}%), retrying with threshold=80")
         _, strict = cv2.threshold(gray, 80, 255, cv2.THRESH_BINARY)
         strict = cv2.morphologyEx(strict, cv2.MORPH_CLOSE, kernel, iterations=2)
         strict = cv2.morphologyEx(strict, cv2.MORPH_OPEN, kernel, iterations=2)
         contours2, _ = cv2.findContours(strict, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         valid2 = [c for c in contours2 if cv2.contourArea(c) >= min_area]
         if valid2:
-            largest2 = max(valid2, key=cv2.contourArea)
             mask = np.zeros_like(gray)
-            cv2.drawContours(mask, [largest2], -1, 255, -1)
+            for contour in valid2:
+                cv2.drawContours(mask, [contour], -1, 255, -1)
     
     return mask
 
