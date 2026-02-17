@@ -163,15 +163,11 @@ def analyze_with_imagej(image_bytes: bytes, save_debug: bool = True):
     
     original_image = image.copy()
     
-    # Step 1: Convert to 8-bit grayscale (same as ImageJ "8-bit")
+    # Step 1: Prepare both grayscale and color representations
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
     
-    # Step 2: Compute histogram and find ImageJ Default threshold
-    histogram = cv2.calcHist([gray], [0], None, [256], [0, 256]).flatten().astype(int)
-    threshold = imagej_isodata_threshold(histogram)
-    logger.info(f"ImageJ IsoData threshold: {threshold}")
-    
-    # Step 3: Detect leaf mask
+    # Step 2: Detect leaf/object mask
     leaf_mask = detect_leaf_mask(gray)
     leaf_area = cv2.countNonZero(leaf_mask)
     
@@ -181,17 +177,45 @@ def analyze_with_imagej(image_bytes: bytes, save_debug: bool = True):
     
     logger.info(f"Leaf area: {leaf_area} px ({leaf_area / (gray.shape[0]*gray.shape[1]) * 100:.1f}% of image)")
     
-    # Step 4: Apply threshold WITHIN the leaf
-    # In ImageJ: pixels above threshold = bright = spray fluorescence
-    _, thresholded = cv2.threshold(gray, threshold, 255, cv2.THRESH_BINARY)
-    spray_mask = cv2.bitwise_and(thresholded, leaf_mask)
+    # ── METHOD 1: Brightness (ImageJ IsoData threshold) ──
+    # Detects bright white/yellow spray spots
+    histogram = cv2.calcHist([gray], [0], None, [256], [0, 256]).flatten().astype(int)
+    threshold = imagej_isodata_threshold(histogram)
+    logger.info(f"ImageJ IsoData threshold (brightness): {threshold}")
     
-    # Step 5: Filter small particles (noise) — like ImageJ Analyze Particles with min size
+    _, brightness_mask = cv2.threshold(gray, threshold, 255, cv2.THRESH_BINARY)
+    brightness_mask = cv2.bitwise_and(brightness_mask, leaf_mask)
+    
+    # ── METHOD 2: Color detection (cyan/blue fluorescence) ──
+    # Detects spray droplets that glow cyan/blue under UV
+    # HSV range for cyan/blue: Hue 85-130, Saturation >30, Value >60
+    lower_cyan = np.array([85, 30, 60])
+    upper_cyan = np.array([130, 255, 255])
+    color_mask_hsv = cv2.inRange(hsv, lower_cyan, upper_cyan)
+    
+    # Additional BGR check: blue or green channel must dominate red
+    b = image[:, :, 0].astype(np.float32)
+    g = image[:, :, 1].astype(np.float32)
+    r = image[:, :, 2].astype(np.float32)
+    cyan_check = ((g > r + 5) & (b > r)).astype(np.uint8) * 255
+    blue_check = ((b > r + 15) & (b > g + 5)).astype(np.uint8) * 255
+    bgr_mask = cv2.bitwise_or(cyan_check, blue_check)
+    
+    color_mask = cv2.bitwise_and(color_mask_hsv, bgr_mask)
+    color_mask = cv2.bitwise_and(color_mask, leaf_mask)
+    
+    # ── COMBINE both methods ──
+    # Spray = bright spots OR cyan/blue fluorescent spots
+    spray_mask = cv2.bitwise_or(brightness_mask, color_mask)
+    
+    logger.info(f"Detection: brightness={cv2.countNonZero(brightness_mask)}px, color={cv2.countNonZero(color_mask)}px, combined={cv2.countNonZero(spray_mask)}px")
+    
+    # Step 5: Filter small particles (noise) — like ImageJ Analyze Particles
     num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(spray_mask, connectivity=8)
     filtered_mask = np.zeros_like(spray_mask)
     for i in range(1, num_labels):
         area = stats[i, cv2.CC_STAT_AREA]
-        if area >= 5:  # Min particle size (same as ImageJ default)
+        if area >= 5:  # Min particle size
             filtered_mask[labels == i] = 255
     
     sprayed_area = cv2.countNonZero(filtered_mask)
