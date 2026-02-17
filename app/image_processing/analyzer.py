@@ -204,11 +204,16 @@ class SprayAnalyzer:
         if len(leaf_pixels) > 0:
             median_val = float(np.median(leaf_pixels))
             std_val = float(np.std(leaf_pixels))
-            # Spray = píxeles significativamente más brillantes que la mediana de la hoja
-            spray_threshold = min(median_val + 1.5 * std_val, 240)
-            spray_threshold = max(spray_threshold, 180)  # mínimo 180 para evitar falsos positivos
+            # Spray = píxeles más brillantes que la mediana + 1 desviación estándar
+            spray_threshold = median_val + 1.0 * std_val
+            spray_threshold = min(spray_threshold, 220)  # máximo 220 para no perder spray
+            spray_threshold = max(spray_threshold, 100)   # mínimo 100 para evitar falsos en fondo
+            import logging
+            logging.getLogger(__name__).info(
+                f"B&W stats: median={median_val:.1f}, std={std_val:.1f}, threshold={spray_threshold:.1f}"
+            )
         else:
-            spray_threshold = 200
+            spray_threshold = 150
         
         fluorescence_mask = cv2.inRange(bw_image, int(spray_threshold), 255)
         fluorescence_mask = cv2.bitwise_and(fluorescence_mask, leaf_mask)
