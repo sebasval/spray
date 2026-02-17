@@ -165,32 +165,37 @@ class SprayAnalyzer:
         # Guardar imagen original para la salida visual
         original_image = image.copy()
 
+        # ============================================================
         # Pre-procesamiento: Contraste alto B&W
-        # Simula el filtro "Contraste alto de B&W" de Microsoft Designer
-        # 1. Convertir a escala de grises
+        # Replica el filtro "Contraste alto de B&W" de Microsoft Designer
+        # ============================================================
         gray_pre = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        # 2. CLAHE para realzar contraste local (resalta las gotas de spray)
+        # CLAHE para realzar contraste local
         clahe = cv2.createCLAHE(clipLimit=4.0, tileGridSize=(8, 8))
         high_contrast = clahe.apply(gray_pre)
-        # 3. Convertir de vuelta a BGR para compatibilidad con el pipeline
-        image = cv2.cvtColor(high_contrast, cv2.COLOR_GRAY2BGR)
+        # Threshold binario Otsu — fuerza blanco/negro puro (alto contraste)
+        _, bw_image = cv2.threshold(high_contrast, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 
-        denoised = cv2.fastNlMeansDenoisingColored(image, None, 3, 3, 7, 21)
-        
-        # 2. Detección de Hoja
-        leaf_mask = SprayAnalyzer._detect_leaf_mask(denoised)
+        # ============================================================
+        # Detección de hoja usando la imagen original (antes del B&W)
+        # ============================================================
+        denoised_orig = cv2.fastNlMeansDenoisingColored(image, None, 3, 3, 7, 21)
+        leaf_mask = SprayAnalyzer._detect_leaf_mask(denoised_orig)
         leaf_area = cv2.countNonZero(leaf_mask)
         
         if leaf_area == 0:
             _, buffer = cv2.imencode('.jpg', original_image)
             processed_image_base64 = base64.b64encode(buffer).decode('utf-8')
             return 0.0, 0, 0, processed_image_base64
-            
-        # 3. Detección de Fluorescencia (brillo + color, limitada a la hoja)
-        fluorescence_mask, _ = SprayAnalyzer._detect_fluorescence(denoised, leaf_mask)
-        
-        # 4. Filtrado de Gotas Válidas (filtra por TAMAÑO/ruido)
-        filtered_mask, has_valid_droplets = SprayAnalyzer._filter_valid_droplets(denoised, fluorescence_mask)
+
+        # ============================================================
+        # Detección de spray: en la imagen B&W, blanco = spray
+        # Los píxeles blancos (255) dentro de la hoja son spray
+        # ============================================================
+        fluorescence_mask = cv2.bitwise_and(bw_image, leaf_mask)
+
+        # Filtrado de gotas válidas (eliminar ruido por tamaño)
+        filtered_mask, has_valid_droplets = SprayAnalyzer._filter_valid_droplets(original_image, fluorescence_mask)
         
         # 5. Calcular Resultados
         if has_valid_droplets:
@@ -211,6 +216,7 @@ class SprayAnalyzer:
         
         # 8. Guardar Debug
         if save_debug:
+            cv2.imwrite("debug_bw_highcontrast.jpg", bw_image)
             cv2.imwrite("debug_leaf_mask.jpg", leaf_mask)
             cv2.imwrite("debug_fluorescence_mask.jpg", fluorescence_mask) 
             cv2.imwrite("debug_filtered_mask.jpg", filtered_mask)       
