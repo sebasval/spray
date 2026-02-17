@@ -168,13 +168,19 @@ class SprayAnalyzer:
         # ============================================================
         # Pre-procesamiento: Contraste alto B&W
         # Replica el filtro "Contraste alto de B&W" de Microsoft Designer
+        # Usa CLAHE + curva S sigmoid (NO binario — conserva tonos de gris)
         # ============================================================
         gray_pre = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         # CLAHE para realzar contraste local
         clahe = cv2.createCLAHE(clipLimit=4.0, tileGridSize=(8, 8))
         high_contrast = clahe.apply(gray_pre)
-        # Threshold binario Otsu — fuerza blanco/negro puro (alto contraste)
-        _, bw_image = cv2.threshold(high_contrast, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        # Curva S sigmoid — empuja oscuros a negro y claros a blanco
+        # pero conserva gradiente (no es binario puro)
+        normalized = high_contrast.astype(np.float32) / 255.0
+        contrast_strength = 12  # pendiente de la curva (más alto = más contraste)
+        midpoint = 0.5
+        curved = 1.0 / (1.0 + np.exp(-contrast_strength * (normalized - midpoint)))
+        bw_image = (curved * 255).astype(np.uint8)
 
         # ============================================================
         # Detección de hoja usando la imagen original (antes del B&W)
@@ -189,10 +195,23 @@ class SprayAnalyzer:
             return 0.0, 0, 0, processed_image_base64
 
         # ============================================================
-        # Detección de spray: en la imagen B&W, blanco = spray
-        # Los píxeles blancos (255) dentro de la hoja son spray
+        # Detección de spray en la imagen B&W de alto contraste
+        # Las gotas de spray aparecen como píxeles brillantes (blancos)
+        # sobre la hoja que es gris/oscura
         # ============================================================
-        fluorescence_mask = cv2.bitwise_and(bw_image, leaf_mask)
+        # Calcular umbral adaptativo dentro de la hoja
+        leaf_pixels = bw_image[leaf_mask > 0]
+        if len(leaf_pixels) > 0:
+            median_val = float(np.median(leaf_pixels))
+            std_val = float(np.std(leaf_pixels))
+            # Spray = píxeles significativamente más brillantes que la mediana de la hoja
+            spray_threshold = min(median_val + 1.5 * std_val, 240)
+            spray_threshold = max(spray_threshold, 180)  # mínimo 180 para evitar falsos positivos
+        else:
+            spray_threshold = 200
+        
+        fluorescence_mask = cv2.inRange(bw_image, int(spray_threshold), 255)
+        fluorescence_mask = cv2.bitwise_and(fluorescence_mask, leaf_mask)
 
         # Filtrado de gotas válidas (eliminar ruido por tamaño)
         filtered_mask, has_valid_droplets = SprayAnalyzer._filter_valid_droplets(original_image, fluorescence_mask)
