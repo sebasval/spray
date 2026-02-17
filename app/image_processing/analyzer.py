@@ -16,20 +16,24 @@ class SprayAnalyzer:
     def _detect_leaf_mask(image: np.ndarray) -> np.ndarray:
         """
         Detecta la máscara de la hoja usando múltiples canales.
-        Ajustado para mejorar la robustez en los bordes y evitar el fondo.
+        Funciona con fondos negros y grises oscuros (ej: Photoroom).
         """
-        hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+        import logging
+        logger = logging.getLogger(__name__)
+        
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         
-        # Umbralización simple para eliminar el fondo negro obvio
-        _, base_mask = cv2.threshold(gray, 15, 255, cv2.THRESH_BINARY)
-
-        # Umbral Otsu en el canal de Saturación (ayuda con los bordes de la hoja)
-        sat = hsv[:, :, 1]
-        _, sat_otsu_mask = cv2.threshold(sat, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-
-        # Combinar máscaras
-        combined_mask = cv2.bitwise_or(base_mask, sat_otsu_mask)
+        # Usar Otsu para encontrar automáticamente el umbral entre fondo y hoja
+        # Esto funciona tanto con fondo negro puro como gris oscuro de Photoroom
+        _, otsu_mask = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        
+        # También probar con un umbral fijo más alto para fondos grises
+        # El fondo de Photoroom suele ser ~40-80, las hojas >80
+        _, fixed_mask = cv2.threshold(gray, 50, 255, cv2.THRESH_BINARY)
+        
+        # Usar la intersección: píxel debe pasar ambos filtros
+        # Esto evita que el fondo gris se cuente como hoja
+        combined_mask = cv2.bitwise_and(otsu_mask, fixed_mask)
         
         # Operaciones morfológicas para limpiar y conectar la máscara
         kernel = np.ones((7, 7), np.uint8)
@@ -40,10 +44,38 @@ class SprayAnalyzer:
         contours, _ = cv2.findContours(cleaned_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         if not contours:
             return np.zeros_like(cleaned_mask)
-            
-        largest_contour = max(contours, key=cv2.contourArea)
+        
+        # Tomar solo el contorno más grande (la hoja)
+        # Filtrar contornos que sean al menos 1% de la imagen (eliminar ruido)
+        image_area = image.shape[0] * image.shape[1]
+        min_contour_area = image_area * 0.01
+        valid_contours = [c for c in contours if cv2.contourArea(c) >= min_contour_area]
+        
+        if not valid_contours:
+            return np.zeros_like(cleaned_mask)
+        
+        largest_contour = max(valid_contours, key=cv2.contourArea)
         final_mask = np.zeros_like(cleaned_mask)
         cv2.drawContours(final_mask, [largest_contour], -1, 255, -1)
+        
+        leaf_area = cv2.countNonZero(final_mask)
+        leaf_pct = (leaf_area / image_area) * 100
+        logger.info(f"Leaf detection: area={leaf_area}, {leaf_pct:.1f}% of image")
+        
+        # Si la hoja ocupa >90% de la imagen, probablemente falló la detección
+        if leaf_pct > 90:
+            logger.warning(f"Leaf mask too large ({leaf_pct:.1f}%), retrying with higher threshold")
+            _, stricter_mask = cv2.threshold(gray, 80, 255, cv2.THRESH_BINARY)
+            stricter_mask = cv2.morphologyEx(stricter_mask, cv2.MORPH_CLOSE, kernel, iterations=2)
+            stricter_mask = cv2.morphologyEx(stricter_mask, cv2.MORPH_OPEN, kernel, iterations=2)
+            contours2, _ = cv2.findContours(stricter_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            valid2 = [c for c in contours2 if cv2.contourArea(c) >= min_contour_area]
+            if valid2:
+                largest2 = max(valid2, key=cv2.contourArea)
+                final_mask = np.zeros_like(cleaned_mask)
+                cv2.drawContours(final_mask, [largest2], -1, 255, -1)
+                leaf_area2 = cv2.countNonZero(final_mask)
+                logger.info(f"Stricter leaf detection: area={leaf_area2}, {(leaf_area2/image_area)*100:.1f}% of image")
 
         return final_mask
 
