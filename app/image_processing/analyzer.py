@@ -161,7 +161,20 @@ class SprayAnalyzer:
         
         if image is None:
             return 0.0, 0, 0, None
-            
+
+        # Guardar imagen original para la salida visual
+        original_image = image.copy()
+
+        # Pre-procesamiento: Contraste alto B&W
+        # Simula el filtro "Contraste alto de B&W" de Microsoft Designer
+        # 1. Convertir a escala de grises
+        gray_pre = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        # 2. CLAHE para realzar contraste local (resalta las gotas de spray)
+        clahe = cv2.createCLAHE(clipLimit=4.0, tileGridSize=(8, 8))
+        high_contrast = clahe.apply(gray_pre)
+        # 3. Convertir de vuelta a BGR para compatibilidad con el pipeline
+        image = cv2.cvtColor(high_contrast, cv2.COLOR_GRAY2BGR)
+
         denoised = cv2.fastNlMeansDenoisingColored(image, None, 3, 3, 7, 21)
         
         # 2. Detección de Hoja
@@ -169,7 +182,7 @@ class SprayAnalyzer:
         leaf_area = cv2.countNonZero(leaf_mask)
         
         if leaf_area == 0:
-            _, buffer = cv2.imencode('.jpg', image)
+            _, buffer = cv2.imencode('.jpg', original_image)
             processed_image_base64 = base64.b64encode(buffer).decode('utf-8')
             return 0.0, 0, 0, processed_image_base64
             
@@ -188,8 +201,8 @@ class SprayAnalyzer:
             sprayed_area = 0
             coverage = 0.0
         
-        # 6. Crear Imagen de Salida
-        processed_image = image.copy()
+        # 6. Crear Imagen de Salida (usar imagen original, no la pre-procesada)
+        processed_image = original_image.copy()
         processed_image[filtered_mask > 0] = [0, 255, 255]  # Amarillo para áreas con spray
         
         # 7. Codificar a Base64
