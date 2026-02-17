@@ -11,3 +11,5 @@ pydantic[email]
 python-multipart
 matplotlib
 httpx
+scikit-image
+scipy
