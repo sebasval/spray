@@ -13,3 +13,4 @@ matplotlib
 httpx
 scikit-image
 scipy
+anthropic>=0.40.0

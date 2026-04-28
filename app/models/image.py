@@ -3,6 +3,9 @@ from typing import List, Optional
 
 class ImageAnalysisResponse(BaseModel):
     coverage_percentage: float
+    coverage_opencv: Optional[float] = None
+    coverage_moondream: Optional[float] = None
+    validation_flag: Optional[str] = None  # "opencv_only" | "validated" | "backup_used"
     total_area: int
     sprayed_area: int
     image_id: str
@@ -12,4 +15,4 @@ class ImageAnalysisResponse(BaseModel):
 class BatchAnalysisResponse(BaseModel):
     analyses: List[ImageAnalysisResponse]
     summary: dict
-    analysis_id: str  # Nuevo campo para identificar el análisis para la descarga del Excel
+    analysis_id: str

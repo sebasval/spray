@@ -390,6 +390,33 @@ class SprayAnalyzer:
         return str(uuid4())
 
     @staticmethod
+    def is_suspicious(coverage: float, leaf_area: int, sprayed_area: int) -> tuple[bool, str]:
+        """
+        Decide if OpenCV's result is suspicious enough to warrant a Claude validation.
+
+        Suspicion criteria:
+        - Very low coverage (<10%): possible false negative (OpenCV missed droplets)
+        - Very high coverage (>90%): possible false positive (detected leaf as spray)
+        - No leaf detected: clearly broken
+        - Sprayed area very small in absolute terms: likely noise
+
+        Returns: (is_suspicious, reason)
+        """
+        if leaf_area == 0:
+            return True, "no_leaf_detected"
+
+        if coverage < 10.0:
+            return True, f"coverage_too_low ({coverage:.2f}%)"
+
+        if coverage > 90.0:
+            return True, f"coverage_too_high ({coverage:.2f}%)"
+
+        if 0 < sprayed_area < 50:
+            return True, f"sprayed_area_too_small ({sprayed_area}px)"
+
+        return False, "normal"
+
+    @staticmethod
     def calculate_batch_summary(analyses: List[ImageAnalysisResponse]) -> dict:
         if not analyses:
             return {
