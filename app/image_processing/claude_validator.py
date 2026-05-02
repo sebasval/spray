@@ -20,7 +20,11 @@ from anthropic import Anthropic
 
 logger = logging.getLogger(__name__)
 
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
+ANTHROPIC_API_KEY = (
+    os.getenv("ANTHROPIC_API_KEY")
+    or os.getenv("CLAUDE_API_KEY")
+    or os.getenv("CLAUDE")  # Railway tiene la variable nombrada así
+)
 MODEL = os.getenv("CLAUDE_MODEL", "claude-haiku-4-5-20251001")
 VALIDATION_THRESHOLD = float(os.getenv("CLAUDE_THRESHOLD", "20.0"))
 
