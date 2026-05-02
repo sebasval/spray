@@ -217,6 +217,13 @@ async def analyze_single_image(
             coverage_cv, coverage_claude
         )
 
+        # Si el % final difiere del de OpenCV (Claude tomó / promedio),
+        # regeneramos la visualización para que el amarillo coincida con el número.
+        if abs(final_coverage - coverage_cv) > 0.5:
+            repainted = SprayAnalyzer.repaint_to_target_coverage(contents, final_coverage)
+            if repainted:
+                processed_image = repainted
+
         image_id = SprayAnalyzer.generate_image_id()
 
         # Captura para dataset (async)
@@ -307,6 +314,12 @@ async def analyze_multiple_images(
             final_coverage, flag, _ = ClaudeValidator.compare_results(
                 coverage_cv, coverage_claude
             )
+
+            # Re-pintamos la visualización para que el amarillo coincida con el % final
+            if abs(final_coverage - coverage_cv) > 0.5:
+                repainted = SprayAnalyzer.repaint_to_target_coverage(contents, final_coverage)
+                if repainted:
+                    processed_image = repainted
 
             image_id = SprayAnalyzer.generate_image_id()
 

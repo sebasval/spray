@@ -381,6 +381,54 @@ class SprayAnalyzer:
 
         return round(coverage, 2), leaf_area, sprayed_area, processed_image_b64
 
+    @staticmethod
+    def repaint_to_target_coverage(image_bytes: bytes, target_pct: float) -> Optional[str]:
+        """
+        Genera una visualización (base64 JPEG) donde el área amarilla cubre EXACTAMENTE
+        target_pct del leaf detectado. Útil cuando el % final viene de Claude (no de OpenCV)
+        y necesitamos que el perfil amarillo coincida con el número que mostramos.
+
+        Estrategia: tomar los pixels más brillantes del leaf hasta cubrir el target.
+        El brillo bajo UV es buen proxy de "donde más probable hay spray".
+        """
+        try:
+            nparr = np.frombuffer(image_bytes, np.uint8)
+            image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+            if image is None:
+                return None
+
+            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+            leaf_mask = SprayAnalyzer._detect_leaf_mask(gray)
+            leaf_area = int(cv2.countNonZero(leaf_mask))
+
+            target = max(0.0, min(100.0, float(target_pct)))
+            target_pixels = int(round(target / 100.0 * leaf_area))
+            target_pixels = max(0, min(target_pixels, leaf_area))
+
+            new_mask = np.zeros_like(leaf_mask)
+
+            if leaf_area > 0 and target_pixels > 0:
+                if target_pixels >= leaf_area:
+                    new_mask = leaf_mask.copy()
+                else:
+                    # Coordenadas + brillos de los pixels del leaf
+                    leaf_idx = np.where(leaf_mask > 0)
+                    brightnesses = gray[leaf_idx]
+                    # Top-N más brillantes (descendente)
+                    top_n_idx = np.argpartition(-brightnesses, target_pixels - 1)[:target_pixels]
+                    rows = leaf_idx[0][top_n_idx]
+                    cols = leaf_idx[1][top_n_idx]
+                    new_mask[rows, cols] = 255
+
+            processed = image.copy()
+            processed[new_mask > 0] = [0, 255, 255]
+
+            _, buffer = cv2.imencode('.jpg', processed)
+            return base64.b64encode(buffer).decode('utf-8')
+        except Exception as e:
+            logger.warning(f"repaint_to_target_coverage failed: {e}")
+            return None
+
     # ──────────────────────────────────────────────
     #  Utilities
     # ──────────────────────────────────────────────
