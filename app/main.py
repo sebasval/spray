@@ -171,7 +171,8 @@ async def privacy_policy():
 async def health_check():
     return {
         "status": "healthy",
-        "version": "1.0.0"
+        "version": "1.0.0",
+        "claude_available": ClaudeValidator.is_available(),
     }
 
 @app.post("/analyze", response_model=ImageAnalysisResponse)
