@@ -24,6 +24,16 @@ from app.auth.security import SECRET_KEY, ALGORITHM
 # WhatsApp Bot
 from app.whatsapp_bot import router as whatsapp_router
 
+# Anthropic acepta jpeg / png / gif / webp como image media_type.
+# Si el upload viene con un MIME no estándar (ej: image/jpg), normalizamos.
+_ANTHROPIC_MEDIA = {"image/jpeg", "image/png", "image/gif", "image/webp"}
+def _resolve_media(content_type):
+    if content_type in _ANTHROPIC_MEDIA:
+        return content_type
+    if content_type == "image/jpg":
+        return "image/jpeg"
+    return "image/jpeg"
+
 # Almacenamiento temporal de resultados (en producción usar Redis o similar)
 analysis_results: Dict[str, dict] = {}
 
@@ -200,7 +210,9 @@ async def analyze_single_image(
         suspicious, reason = SprayAnalyzer.is_suspicious(coverage_cv, total_area, sprayed_area)
         coverage_claude = -1.0
         if suspicious and ClaudeValidator.is_available():
-            coverage_claude, _ = ClaudeValidator.estimate_coverage(contents)
+            coverage_claude, _ = ClaudeValidator.estimate_coverage(
+                contents, media_type=_resolve_media(file.content_type)
+            )
         final_coverage, flag, _ = ClaudeValidator.compare_results(
             coverage_cv, coverage_claude
         )
@@ -289,7 +301,9 @@ async def analyze_multiple_images(
             suspicious, reason = SprayAnalyzer.is_suspicious(coverage_cv, total_area, sprayed_area)
             coverage_claude = -1.0
             if suspicious and claude_available:
-                coverage_claude, _ = ClaudeValidator.estimate_coverage(contents)
+                coverage_claude, _ = ClaudeValidator.estimate_coverage(
+                    contents, media_type=_resolve_media(file.content_type)
+                )
             final_coverage, flag, _ = ClaudeValidator.compare_results(
                 coverage_cv, coverage_claude
             )
